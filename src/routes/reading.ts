@@ -7,6 +7,15 @@ import {
   getCurrentReadingByUserId,addBookToShelf,  
 } from '../repositories/userBooksRepository';
 import { recommendPortion } from '../services/recommendationService';
+// src/routes/reading.ts 상단
+// 다른 import 들 아래에 추가
+import * as readingSessionsRepository from '../repositories/readingSessionsRepository';
+
+console.log('🔥 readingSessionsRepository exports:', readingSessionsRepository);
+
+const { createReadingSession, finishReadingSession } = readingSessionsRepository;
+
+
 const router = express.Router();
 
 // TODO: 실제 프로젝트의 User 타입/미들웨어에 맞게 수정
@@ -157,5 +166,155 @@ router.post(
   },
 );
 
+/**
+ * POST /api/reading/sessions
+ * 읽기 세션 시작
+ *
+ * body:
+ * {
+ *   "user_book_id": "user_books.id",
+ *   "book_id": "books.id",
+ *   "start_page": 21,
+ *   "end_page": 44,
+ *   "planned_pages": 24,          // (선택) 없으면 end-start+1
+ *   "session_type": "commute",    // (선택) 'commute' | 'timer', 기본 'commute'
+ *   "commute_profile_id": "....", // (선택)
+ *   
+ * }
+ */
+router.post(
+  '/sessions',
+  async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId =
+        req.user?.id ?? (req.header('x-user-id') as string | undefined);
+
+      if (!userId) {
+        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+      }
+
+      const {
+        user_book_id,
+        book_id,
+        start_page,
+        end_page,
+        planned_pages,
+        session_type,
+        commute_profile_id,
+  
+      } = req.body as {
+        user_book_id?: string;
+        book_id?: string;
+        start_page?: number;
+        end_page?: number;
+        planned_pages?: number;
+        session_type?: 'commute' | 'timer';
+        commute_profile_id?: string | null;
+     
+      };
+
+      if (!user_book_id) {
+        return res.status(400).json({ message: 'user_book_id is required' });
+      }
+      if (!book_id) {
+        return res.status(400).json({ message: 'book_id is required' });
+      }
+      if (
+        start_page == null ||
+        end_page == null ||
+        typeof start_page !== 'number' ||
+        typeof end_page !== 'number'
+      ) {
+        return res
+          .status(400)
+          .json({ message: 'start_page and end_page must be numbers' });
+      }
+
+      const session = await createReadingSession({
+        userId,
+        userBookId: user_book_id,
+        bookId: book_id,
+        startPage: start_page,
+        endPage: end_page,
+        plannedPages: planned_pages,
+        sessionType: session_type,
+        commuteProfileId: commute_profile_id,
+    
+      });
+
+      return res.status(201).json(session);
+    } catch (err) {
+      console.error('[POST /api/reading/sessions] error', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  },
+);
+/**
+ * PATCH /api/reading/sessions/:sessionId/finish
+ * 읽기 세션 종료
+ *
+ * body:
+ * {
+ *   "end_page": 44,
+ *   "actual_minutes": 23
+ * 
+ * }
+ */
+router.patch(
+  '/sessions/:sessionId/finish',
+  async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId =
+        req.user?.id ?? (req.header('x-user-id') as string | undefined);
+
+      if (!userId) {
+        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+      }
+
+      const { sessionId } = req.params;
+      const { end_page, actual_minutes } = req.body as {
+        end_page?: number;
+        actual_minutes?: number;
+       
+      };
+
+      if (!sessionId) {
+        return res.status(400).json({ message: 'sessionId is required' });
+      }
+      if (
+        end_page == null ||
+        typeof end_page !== 'number' ||
+        end_page <= 0
+      ) {
+        return res
+          .status(400)
+          .json({ message: 'end_page must be a positive number' });
+      }
+      if (
+        actual_minutes == null ||
+        typeof actual_minutes !== 'number' ||
+        actual_minutes <= 0
+      ) {
+        return res
+          .status(400)
+          .json({ message: 'actual_minutes must be a positive number' });
+      }
+
+      const session = await finishReadingSession({
+        userId,
+        sessionId,
+        actualEndPage: end_page,
+        durationMinutes: actual_minutes,
+       
+      });
+
+      return res.json(session);
+    } catch (err: any) {
+      console.error('[PATCH /api/reading/sessions/:id/finish] error', err);
+      const message = err?.message ?? 'Internal server error';
+      return res.status(500).json({ message });
+    }
+  },
+);
 
 export default router;
