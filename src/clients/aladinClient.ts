@@ -1,67 +1,77 @@
 // src/clients/aladinClient.ts
 import fetch from 'node-fetch';
-import { config } from '../core/config';
+import 'dotenv/config';
 
+const ALADIN_TTB_KEY = process.env.ALADIN_TTB_KEY ?? '';
 const BASE_URL = 'https://www.aladin.co.kr/ttb/api';
 
-/**
- * 알라딘 검색 API (ItemSearch)
- */
-export async function searchBooksFromAladin(query: string, maxResults = 10) {
-  if (!config.aladinTtbKey) {
-    throw new Error('ALADIN_TTB_KEY is not set');
-  }
+if (!ALADIN_TTB_KEY) {
+  console.warn('⚠️ ALADIN_TTB_KEY 가 .env 에 설정되지 않았습니다.');
+}
 
-  const url =
-    `${BASE_URL}/ItemSearch.aspx?` +
-    `TTBKey=${encodeURIComponent(config.aladinTtbKey)}` +
-    `&Query=${encodeURIComponent(query)}` +
-    `&QueryType=Title` +
-    `&MaxResults=${maxResults}` +
-    `&start=1` +
-    `&SearchTarget=Book` +
-    `&Output=JS` +
-    `&Version=20131101`;
+export async function searchBooksFromAladin(q: string, maxResults = 10) {
+  const url = new URL(`${BASE_URL}/ItemSearch.aspx`);
+  url.searchParams.set('TTBKey', ALADIN_TTB_KEY);
+  url.searchParams.set('Query', q);
+  url.searchParams.set('QueryType', 'Keyword'); // 제목+저자+출판사 등 통합 검색
+  url.searchParams.set('MaxResults', String(maxResults));
+  url.searchParams.set('SearchTarget', 'Book');
+  url.searchParams.set('Output', 'JS');
+  url.searchParams.set('Cover', 'Big');
+  url.searchParams.set('Version', '20131101');
 
-  console.log('🔍 [Aladin] ItemSearch URL:', url);
+  console.log('🔍 [Aladin] ItemSearch URL:', url.toString());
 
-  const res = await fetch(url);
+  const res = await fetch(url.toString());
   if (!res.ok) {
     const text = await res.text();
-    console.error('❌ [Aladin] ItemSearch error:', res.status, res.statusText, text);
-    throw new Error(`Aladin API error: ${res.status} ${res.statusText}`);
+    console.error('[Aladin] search error:', res.status, res.statusText, text);
+    throw new Error('Aladin search failed');
   }
 
+  const data = (await res.json()) as any;
+  return data;
+}
+
+// src/clients/aladinClient.ts
+export async function getBookDetailFromAladin(id: string) {
+  const TTBKey = process.env.ALADIN_TTB_KEY ?? '';
+
+  // ✅ 13자리 숫자면 ISBN13, 아니면 상품번호(ItemId)로 가정
+  const isIsbn13 = /^\d{13}$/.test(id);
+
+  const params = new URLSearchParams({
+    TTBKey,
+    ItemId: id,
+    ItemIdType: isIsbn13 ? 'ISBN13' : 'ItemId',
+    Output: 'JS',
+    Cover: 'Big',
+    Version: '20131101',
+  });
+
+  const url = `https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx?${params.toString()}`;
+  console.log('📖 [Aladin] ItemLookUp URL:', url);
+
+  const res = await fetch(url);
   const data = await res.json();
   return data;
 }
 
-/**
- * 알라딘 상세 API (ItemLookUp)
- */
-export async function getBookDetailFromAladin(itemId: string) {
-  if (!config.aladinTtbKey) {
-    throw new Error('ALADIN_TTB_KEY is not set');
-  }
+// ✅ 신규: ISBN13 전용
+export async function getBookDetailByIsbnFromAladin(isbn13: string) {
+  const params = new URLSearchParams({
+    TTBKey: process.env.ALADIN_TTB_KEY ?? '',
+    ItemId: isbn13,
+    ItemIdType: 'ISBN13',   // ✅ 여기 다름
+    Output: 'JS',
+    Cover: 'Big',
+    Version: '20131101',
+  });
 
-  const url =
-    `${BASE_URL}/ItemLookUp.aspx?` +
-    `TTBKey=${encodeURIComponent(config.aladinTtbKey)}` +
-    `&ItemId=${encodeURIComponent(itemId)}` +
-    `&ItemIdType=ItemId` +
-    `&Output=JS` +
-    `&Cover=Big` +
-    `&Version=20131101`;
-
-  console.log('📖 [Aladin] ItemLookUp URL:', url);
+  const url = `https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx?${params.toString()}`;
+  console.log('📖 [Aladin] ItemLookUp(ISBN13) URL:', url);
 
   const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text();
-    console.error('❌ [Aladin] ItemLookUp error:', res.status, res.statusText, text);
-    throw new Error(`Aladin Detail error: ${res.status} ${res.statusText}`);
-  }
-
   const data = await res.json();
   return data;
 }

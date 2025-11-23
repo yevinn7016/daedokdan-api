@@ -221,6 +221,21 @@ export async function recommendPortion({
 
   // 4) 읽을 페이지 수 계산 (정식 산정식)
   //    N = T_eff × PPM × D × ε
+  console.log("=========================================");
+  console.log("[recommendPortion] 계산 과정");
+  console.log("-----------------------------------------");
+  console.log(`T_eff (availableMinutes) = ${availableMinutes}`);
+  console.log(`PPM (usedPpm)            = ${usedPpm}`);
+  console.log(`난이도 계수(D)           = ${difficultyFactor}`);
+  console.log(`여유계수(ε)              = ${slackFactor}`);
+
+  const calc = availableMinutes * usedPpm * difficultyFactor * slackFactor;
+  console.log("");
+  console.log(`→ rawPagesToRead 계산`);
+  console.log(`  = round(${availableMinutes} × ${usedPpm} × ${difficultyFactor} × ${slackFactor})`);
+  console.log(`  = round(${calc})`);
+  console.log("");
+
   const rawPagesToRead = Math.max(
     1,
     Math.round(availableMinutes * usedPpm * difficultyFactor * slackFactor),
