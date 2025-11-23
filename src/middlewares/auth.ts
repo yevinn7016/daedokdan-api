@@ -2,7 +2,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 
-// req.user를 쓰기 위한 타입 확장
 export interface AuthedRequest extends Request {
   user?: {
     id: string;
@@ -10,7 +9,6 @@ export interface AuthedRequest extends Request {
   };
 }
 
-// ✅ 반드시 함수여야 하고, export 방식이 라우터와 맞아야 함
 export const authMiddleware: RequestHandler = (
   req: AuthedRequest,
   res: Response,
@@ -29,8 +27,18 @@ export const authMiddleware: RequestHandler = (
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
+    // ✅ 디버깅용: payload 확인
+    console.log('[authMiddleware] decoded payload:', payload);
+
+    // ✅ 여러 가능성 고려해서 userId 뽑기
+    const userId = payload.userId ?? payload.id ?? payload.sub;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Invalid token payload: no user id' });
+    }
+
     req.user = {
-      id: payload.userId,
+      id: userId,
       email: payload.email,
     };
 

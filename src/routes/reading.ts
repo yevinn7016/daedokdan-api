@@ -1,28 +1,27 @@
 // src/routes/reading.ts
 import express, { Request, Response } from 'express';
 import * as userBooksRepository from '../repositories/userBooksRepository';
-console.log("🔥 userBooksRepository exports:", userBooksRepository);
+console.log('🔥 userBooksRepository exports:', userBooksRepository);
 import {
   getBookshelfByUserId,
-  getCurrentReadingByUserId,addBookToShelf,  
+  getCurrentReadingByUserId,
+  addBookToShelf,
 } from '../repositories/userBooksRepository';
 import { recommendPortion } from '../services/recommendationService';
-// src/routes/reading.ts 상단
-// 다른 import 들 아래에 추가
 import * as readingSessionsRepository from '../repositories/readingSessionsRepository';
 
 console.log('🔥 readingSessionsRepository exports:', readingSessionsRepository);
-
 const { createReadingSession, finishReadingSession } = readingSessionsRepository;
 
+// ✅ auth 미들웨어 (books.ts, search.ts와 동일한 named import)
+import { authMiddleware } from '../middlewares/auth';
 
 const router = express.Router();
 
-// TODO: 실제 프로젝트의 User 타입/미들웨어에 맞게 수정
+// 인증된 요청 타입
 interface AuthedRequest extends Request {
   user?: {
     id: string;
-    // 필요하면 email 등 추가
   };
 }
 
@@ -32,18 +31,17 @@ interface AuthedRequest extends Request {
  */
 router.get(
   '/current',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      // 실제로는 JWT 미들웨어에서 세팅해주도록
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const items = await getCurrentReadingByUserId(userId);
-
       return res.json({ items });
     } catch (err) {
       console.error('[GET /api/reading/current] error', err);
@@ -58,17 +56,17 @@ router.get(
  */
 router.get(
   '/bookshelf',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const bookshelf = await getBookshelfByUserId(userId);
-
       return res.json(bookshelf);
     } catch (err) {
       console.error('[GET /api/reading/bookshelf] error', err);
@@ -76,19 +74,21 @@ router.get(
     }
   },
 );
+
 /**
  * POST /api/reading/bookshelf
  * 내 서재에 책 담기
  */
 router.post(
   '/bookshelf',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const { book_id } = req.body as { book_id?: string };
@@ -98,7 +98,6 @@ router.post(
       }
 
       const result = await addBookToShelf(userId, book_id);
-
       return res.status(result.alreadyExists ? 200 : 201).json(result);
     } catch (err) {
       console.error('[POST /api/reading/bookshelf] error', err);
@@ -106,19 +105,21 @@ router.post(
     }
   },
 );
+
 /**
  * POST /api/reading/recommend
  * body: { book_id, available_minutes }
  */
 router.post(
   '/recommend',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const {
@@ -159,7 +160,6 @@ router.post(
       return res.json(result);
     } catch (err: any) {
       console.error('[POST /api/reading/recommend] error', err);
-      // 서비스에서 던진 에러 메시지가 있으면 그대로 내려줌 (디버깅용)
       const message = err?.message ?? 'Internal server error';
       return res.status(500).json({ message });
     }
@@ -169,28 +169,17 @@ router.post(
 /**
  * POST /api/reading/sessions
  * 읽기 세션 시작
- *
- * body:
- * {
- *   "user_book_id": "user_books.id",
- *   "book_id": "books.id",
- *   "start_page": 21,
- *   "end_page": 44,
- *   "planned_pages": 24,          // (선택) 없으면 end-start+1
- *   "session_type": "commute",    // (선택) 'commute' | 'timer', 기본 'commute'
- *   "commute_profile_id": "....", // (선택)
- *   
- * }
  */
 router.post(
   '/sessions',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const {
@@ -201,7 +190,6 @@ router.post(
         planned_pages,
         session_type,
         commute_profile_id,
-  
       } = req.body as {
         user_book_id?: string;
         book_id?: string;
@@ -210,7 +198,6 @@ router.post(
         planned_pages?: number;
         session_type?: 'commute' | 'timer';
         commute_profile_id?: string | null;
-     
       };
 
       if (!user_book_id) {
@@ -239,7 +226,6 @@ router.post(
         plannedPages: planned_pages,
         sessionType: session_type,
         commuteProfileId: commute_profile_id,
-    
       });
 
       return res.status(201).json(session);
@@ -249,43 +235,33 @@ router.post(
     }
   },
 );
+
 /**
  * PATCH /api/reading/sessions/:sessionId/finish
  * 읽기 세션 종료
- *
- * body:
- * {
- *   "end_page": 44,
- *   "actual_minutes": 23
- * 
- * }
  */
 router.patch(
   '/sessions/:sessionId/finish',
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
-      const userId =
-        req.user?.id ?? (req.header('x-user-id') as string | undefined);
-
+      const userId = req.user?.id;
       if (!userId) {
-        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+        return res
+          .status(401)
+          .json({ message: 'Unauthorized: userId not found' });
       }
 
       const { sessionId } = req.params;
       const { end_page, actual_minutes } = req.body as {
         end_page?: number;
         actual_minutes?: number;
-       
       };
 
       if (!sessionId) {
         return res.status(400).json({ message: 'sessionId is required' });
       }
-      if (
-        end_page == null ||
-        typeof end_page !== 'number' ||
-        end_page <= 0
-      ) {
+      if (end_page == null || typeof end_page !== 'number' || end_page <= 0) {
         return res
           .status(400)
           .json({ message: 'end_page must be a positive number' });
@@ -305,7 +281,6 @@ router.patch(
         sessionId,
         actualEndPage: end_page,
         durationMinutes: actual_minutes,
-       
       });
 
       return res.json(session);
