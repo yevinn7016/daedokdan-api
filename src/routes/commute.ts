@@ -1,6 +1,6 @@
 // src/routes/commute.ts
-import { Router } from "express";
-// import { authMiddleware } from "../middlewares/auth"; // 필요하면 켜기
+import { Router, Request, Response } from "express";
+import { authMiddleware, AuthedRequest } from "../middlewares/auth";
 import { searchPlacesByKeyword } from "../services/kakaoPlacesService";
 import { upsertPlaces, getPlaceById } from "../repositories/placesCacheRepository";
 import { searchPubTransRoutes } from "../services/odsayService";
@@ -13,7 +13,7 @@ const router = Router();
  * - 카카오 keyword search 결과 반환
  * - 동시에 places_cache에 upsert (placeId→좌표 캐시)
  */
-router.get("/places/search", /* authMiddleware, */ async (req, res) => {
+router.get("/places/search", authMiddleware, async (req: AuthedRequest, res: Response) => {
   try {
     const query = String(req.query.query ?? "").trim();
     if (!query) {
@@ -38,7 +38,7 @@ router.get("/places/search", /* authMiddleware, */ async (req, res) => {
  * - ODsay로 최적+대안 경로 계산
  * - normalize 후 (최적1 + 대안3) 반환
  */
-router.post("/routes", /* authMiddleware, */ async (req, res) => {
+router.post("/routes", authMiddleware, async (req: AuthedRequest, res: Response) => {
   try {
     const { originPlaceId, destinationPlaceId } = req.body ?? {};
 
