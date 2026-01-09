@@ -81,11 +81,9 @@ router.get(
 );
 /**
  * POST /api/reading/recommend/commute
- * ✅ Authorization 없음 (개발용)
- *
+ * 
  * body:
  * {
- *   user_id: string,
  *   book_id: string,
  *   user_book_id: string,
  *   origin_place_id: string,
@@ -95,17 +93,21 @@ router.get(
  */
 router.post(
   '/recommend/commute',
-  async (req: Request, res: Response) => {
+  authMiddleware,
+  async (req: AuthedRequest, res: Response) => {
     try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ message: 'Unauthorized: userId not found' });
+      }
+
       const {
-        user_id,
         book_id,
         user_book_id,
         origin_place_id,
         destination_place_id,
         selected_route_id,
       } = req.body as {
-        user_id?: string;
         book_id?: string;
         user_book_id?: string;
         origin_place_id?: string;
@@ -114,9 +116,6 @@ router.post(
       };
 
       // 1️⃣ 필수값 체크
-      if (!user_id) {
-        return res.status(400).json({ message: 'user_id is required' });
-      }
       if (!book_id) {
         return res.status(400).json({ message: 'book_id is required' });
       }
@@ -181,7 +180,7 @@ router.post(
 
       // 4️⃣ 분량 추천
       const recommendation = await recommendPortion({
-        userId: user_id,
+        userId: userId,
         bookId: book_id,
         availableMinutes,
       });
@@ -450,11 +449,11 @@ router.post(
  * POST /api/reading/sessions
  * 읽기 세션 시작
  */
-router.post('/sessions', async (req: Request, res: Response) => {
+router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Response) => {
   try {
-    const userId = (req.body?.user_id ?? req.body?.userId) as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ message: 'user_id (or userId) is required (no-auth mode)' });
+      return res.status(401).json({ message: 'Unauthorized: userId not found' });
     }
 
     const {
@@ -578,15 +577,15 @@ router.post('/sessions', async (req: Request, res: Response) => {
 
 /**
  * PATCH /api/reading/sessions/:sessionId/finish
- * 읽기 세션 종료 (무인증 버전)
+ * 읽기 세션 종료
  *
- * body: { user_id(or userId), end_page, actual_minutes }
+ * body: { end_page, actual_minutes }
  */
-router.patch('/sessions/:sessionId/finish', async (req: Request, res: Response) => {
+router.patch('/sessions/:sessionId/finish', authMiddleware, async (req: AuthedRequest, res: Response) => {
   try {
-    const userId = (req.body?.user_id ?? req.body?.userId) as string | undefined;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ message: 'user_id (or userId) is required (no-auth mode)' });
+      return res.status(401).json({ message: 'Unauthorized: userId not found' });
     }
 
     const { sessionId } = req.params;
