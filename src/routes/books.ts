@@ -9,9 +9,8 @@ import { upsertBooksFromAladinItems } from '../repositories/bookRepository';
 import { saveRecentSearch } from '../repositories/searchRepository';
 import { addRecentBook } from '../repositories/recentBooksRepository';
 
-// ✅ 토큰 기반 인증 미들웨어
+// ✅ 토큰 기반 인증 미들웨어 (named import)
 import { authMiddleware } from '../middlewares/auth';
-
 
 const supabaseUrl = process.env.SUPABASE_URL ?? '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -20,7 +19,6 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 const router = Router();
 
-// 인증된 요청 타입 (선택)
 interface AuthedRequest extends Request {
   user?: {
     id: string;
@@ -34,7 +32,7 @@ interface AuthedRequest extends Request {
  */
 router.get(
   '/search/books',
-  authMiddleware, // ✅ 로그인 필수
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     try {
       const q = (req.query.q as string) || '';
@@ -61,11 +59,9 @@ router.get(
 
       const userId = req.user?.id;
       if (!userId) {
-        // authMiddleware가 있기 때문에 여기에 들어올 일은 거의 없지만 방어코드
         return res.status(401).json({ message: 'Unauthorized: userId not found' });
       }
 
-      // 최근 검색어는 실패해도 메인 응답은 보내기 위해 fire-and-forget
       saveRecentSearch(userId, q).catch((err) =>
         console.error('❌ failed to save recent search', err),
       );
@@ -88,7 +84,7 @@ router.get(
  */
 router.get(
   '/books/:itemId',
-  authMiddleware, // ✅ 최근 본 책 기록 때문에 로그인 필요하게 처리
+  authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     const { itemId } = req.params;
 
@@ -156,7 +152,7 @@ router.get(
           ? Number(subInfo.itemPage)
           : null;
 
-      // 작가 소개: 루트 authorInfo 혹은 authors[].authorInfo
+      // 작가 소개
       let authorIntro: string | null = null;
       if (typeof detailItem.authorInfo === 'string' && detailItem.authorInfo.trim()) {
         authorIntro = detailItem.authorInfo.trim();

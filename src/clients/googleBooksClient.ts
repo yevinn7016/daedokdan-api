@@ -11,9 +11,6 @@ type GoogleBookQueryInput = {
   authors?: string[] | null;
 };
 
-/**
- * Google Books에서 한 권 검색해서 가장 관련도 높은 책 1권만 돌려주는 함수
- */
 export async function fetchGoogleBook(
   input: GoogleBookQueryInput
 ): Promise<null | {
@@ -57,7 +54,6 @@ export async function fetchGoogleBook(
   }
 
   const data = (await res.json()) as any;
-
   if (!data.items || data.items.length === 0) return null;
 
   const item = data.items[0];

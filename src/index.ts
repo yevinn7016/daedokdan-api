@@ -8,9 +8,10 @@ import searchRouter from './routes/search';
 import readingRouter from './routes/reading';
 const app = express();
 
+
 app.use(cors());
 app.use(express.json());
-
+app.use(express.urlencoded({ extended: true }));
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -28,4 +29,6 @@ app.listen(PORT, () => {
   console.log('🔗 search routes mounted at /api/search');
   console.log('📖 reading routes mounted at /api/reading');
 });
+import commuteRoutes from "./routes/commute";
+app.use("/api/commute", commuteRoutes);
 

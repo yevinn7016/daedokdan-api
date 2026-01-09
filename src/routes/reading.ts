@@ -11,10 +11,11 @@ import { recommendPortion } from '../services/recommendationService';
 import * as readingSessionsRepository from '../repositories/readingSessionsRepository';
 console.log('🔥 readingSessionsRepository exports:', readingSessionsRepository);
 const { createReadingSession, finishReadingSession } = readingSessionsRepository;
-
+import { getPlaceById } from '../repositories/placesCacheRepository';
 // ✅ auth 미들웨어
 import { authMiddleware } from '../middlewares/auth';
-
+import { searchPubTransRoutes } from '../services/odsayService';
+import { normalizeOdsayRoutes } from '../services/odsayNormalize';
 // 🔹 page_count 보정용
 import { supabase } from '../core/db';
 import { getBookDetailFromAladin, getBookDetailByIsbnFromAladin  } from '../clients/aladinClient';
@@ -78,6 +79,141 @@ router.get(
     }
   },
 );
+/**
+ * POST /api/reading/recommend/commute
+ * ✅ Authorization 없음 (개발용)
+ *
+ * body:
+ * {
+ *   user_id: string,
+ *   book_id: string,
+ *   user_book_id: string,
+ *   origin_place_id: string,
+ *   destination_place_id: string,
+ *   selected_route_id: string
+ * }
+ */
+router.post(
+  '/recommend/commute',
+  async (req: Request, res: Response) => {
+    try {
+      const {
+        user_id,
+        book_id,
+        user_book_id,
+        origin_place_id,
+        destination_place_id,
+        selected_route_id,
+      } = req.body as {
+        user_id?: string;
+        book_id?: string;
+        user_book_id?: string;
+        origin_place_id?: string;
+        destination_place_id?: string;
+        selected_route_id?: string;
+      };
+
+      // 1️⃣ 필수값 체크
+      if (!user_id) {
+        return res.status(400).json({ message: 'user_id is required' });
+      }
+      if (!book_id) {
+        return res.status(400).json({ message: 'book_id is required' });
+      }
+      if (!user_book_id) {
+        return res.status(400).json({ message: 'user_book_id is required' });
+      }
+      if (!origin_place_id || !destination_place_id || !selected_route_id) {
+        return res.status(400).json({
+          message: 'origin_place_id, destination_place_id, selected_route_id are required',
+        });
+      }
+
+      // 2️⃣ placeId → 좌표 조회
+      const origin = await getPlaceById(String(origin_place_id));
+      const dest = await getPlaceById(String(destination_place_id));
+
+      if (
+        !origin ||
+        !dest ||
+        origin.lat == null ||
+        origin.lng == null ||
+        dest.lat == null ||
+        dest.lng == null
+      ) {
+        return res.status(400).json({
+          message: 'Invalid placeId. Please search places again.',
+        });
+      }
+
+      // 3️⃣ ODsay 호출 → 경로 생성
+      const raw = await searchPubTransRoutes({
+        sx: Number(origin.lng),
+        sy: Number(origin.lat),
+        ex: Number(dest.lng),
+        ey: Number(dest.lat),
+        lang: 0,
+      });
+
+      const normalized: any = normalizeOdsayRoutes(raw);
+
+      if (normalized?.odsayError) {
+        return res.status(502).json({ message: normalized.odsayError });
+      }
+
+      const routes = normalized.routes ?? [];
+      const selected = routes.find(
+        (r: any) => String(r.id) === String(selected_route_id),
+      );
+
+      if (!selected) {
+        return res.status(400).json({
+          message: `selected_route_id not found: ${selected_route_id}`,
+        });
+      }
+
+      const availableMinutes = Number(selected.totalMinutes);
+      if (!availableMinutes || availableMinutes <= 0) {
+        return res.status(500).json({
+          message: 'Invalid commute time from selected route',
+        });
+      }
+
+      // 4️⃣ 분량 추천
+      const recommendation = await recommendPortion({
+        userId: user_id,
+        bookId: book_id,
+        availableMinutes,
+      });
+
+      // 5️⃣ 응답
+      return res.json({
+        ...recommendation,
+        meta: {
+          userBookId: user_book_id,
+          originPlaceId: origin_place_id,
+          destinationPlaceId: destination_place_id,
+          selectedRouteId: selected_route_id,
+          availableMinutes,
+          selectedRouteSummary: {
+            tag: selected.tag ?? null,
+            totalMinutes: selected.totalMinutes ?? null,
+            walkMinutes: selected.walkMinutes ?? null,
+            transfers: selected.transfers ?? null,
+            fare: selected.fare ?? null,
+          },
+        },
+      });
+    } catch (err: any) {
+      console.error('[POST /api/reading/recommend/commute] error', err);
+      return res.status(500).json({
+        message: err?.message ?? 'Internal server error',
+      });
+    }
+  },
+);
+
+
 
 /**
  * POST /api/reading/bookshelf
@@ -314,51 +450,86 @@ router.post(
  * POST /api/reading/sessions
  * 읽기 세션 시작
  */
-router.post(
-  '/sessions',
-  authMiddleware,
-  async (req: AuthedRequest, res: Response) => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res
-          .status(401)
-          .json({ message: 'Unauthorized: userId not found' });
+router.post('/sessions', async (req: Request, res: Response) => {
+  try {
+    const userId = (req.body?.user_id ?? req.body?.userId) as string | undefined;
+    if (!userId) {
+      return res.status(400).json({ message: 'user_id (or userId) is required (no-auth mode)' });
+    }
+
+    const {
+      user_book_id,
+      book_id,
+      start_page,
+      end_page,
+      planned_pages,
+      session_type,
+
+      // ✅ commute 선택용
+      origin_place_id,
+      destination_place_id,
+      selected_route_id,
+    } = req.body as {
+      user_book_id?: string;
+      book_id?: string;
+      start_page?: number;
+      end_page?: number;
+      planned_pages?: number;
+      session_type?: 'commute' | 'timer';
+
+      origin_place_id?: string;
+      destination_place_id?: string;
+      selected_route_id?: string;
+    };
+
+    if (!user_book_id) return res.status(400).json({ message: 'user_book_id is required' });
+    if (!book_id) return res.status(400).json({ message: 'book_id is required' });
+
+    if (
+      start_page == null ||
+      end_page == null ||
+      typeof start_page !== 'number' ||
+      typeof end_page !== 'number'
+    ) {
+      return res.status(400).json({ message: 'start_page and end_page must be numbers' });
+    }
+
+    const effectiveType: 'commute' | 'timer' = session_type ?? 'timer';
+
+    // ✅ COMMUTE 세션: 선택 경로 저장 포함
+    if (effectiveType === 'commute') {
+      if (!origin_place_id || !destination_place_id || !selected_route_id) {
+        return res.status(400).json({
+          message: 'origin_place_id, destination_place_id, selected_route_id are required for commute session',
+        });
       }
 
-      const {
-        user_book_id,
-        book_id,
-        start_page,
-        end_page,
-        planned_pages,
-        session_type,
-        commute_profile_id,
-      } = req.body as {
-        user_book_id?: string;
-        book_id?: string;
-        start_page?: number;
-        end_page?: number;
-        planned_pages?: number;
-        session_type?: 'commute' | 'timer';
-        commute_profile_id?: string | null;
-      };
+      const origin = await getPlaceById(String(origin_place_id));
+      const dest = await getPlaceById(String(destination_place_id));
 
-      if (!user_book_id) {
-        return res.status(400).json({ message: 'user_book_id is required' });
+      if (!origin || !dest || origin.lat == null || origin.lng == null || dest.lat == null || dest.lng == null) {
+        return res.status(400).json({
+          message: 'placeId not found or missing lat/lng. Please call /api/commute/places/search first.',
+        });
       }
-      if (!book_id) {
-        return res.status(400).json({ message: 'book_id is required' });
+
+      const raw = await searchPubTransRoutes({
+        sx: Number(origin.lng),
+        sy: Number(origin.lat),
+        ex: Number(dest.lng),
+        ey: Number(dest.lat),
+        lang: 0,
+      });
+
+      const normalized: any = normalizeOdsayRoutes(raw);
+      if (normalized?.odsayError) {
+        return res.status(502).json({ message: normalized.odsayError });
       }
-      if (
-        start_page == null ||
-        end_page == null ||
-        typeof start_page !== 'number' ||
-        typeof end_page !== 'number'
-      ) {
-        return res
-          .status(400)
-          .json({ message: 'start_page and end_page must be numbers' });
+
+      const routes = normalized.routes ?? [];
+      const selected = routes.find((r: any) => String(r.id) === String(selected_route_id));
+      if (!selected) {
+        return res.status(400).json({ message: `selected_route_id not found: ${selected_route_id}` });
       }
 
       const session = await createReadingSession({
@@ -368,72 +539,85 @@ router.post(
         startPage: start_page,
         endPage: end_page,
         plannedPages: planned_pages,
-        sessionType: session_type,
-        commuteProfileId: commute_profile_id,
+        sessionType: 'commute',
+        commuteProfileId: null,
+
+        // ✅ 저장 필드들 (repo 확장한 최종본 기준)
+        originPlaceId: String(origin_place_id),
+        destinationPlaceId: String(destination_place_id),
+        selectedRouteId: String(selected_route_id),
+
+        commuteTotalMinutes: selected.totalMinutes ?? null,
+        commuteWalkMinutes: selected.walkMinutes ?? null,
+        commuteTransfers: selected.transfers ?? null,
+        commuteFare: selected.fare ?? null,
+        commuteRouteJson: selected,
       });
 
       return res.status(201).json(session);
-    } catch (err) {
-      console.error('[POST /api/reading/sessions] error', err);
-      return res.status(500).json({ message: 'Internal server error' });
     }
-  },
-);
+
+    // ✅ TIMER 세션 (기존)
+    const session = await createReadingSession({
+      userId,
+      userBookId: user_book_id,
+      bookId: book_id,
+      startPage: start_page,
+      endPage: end_page,
+      plannedPages: planned_pages,
+      sessionType: 'timer',
+      commuteProfileId: null,
+    });
+
+    return res.status(201).json(session);
+  } catch (err) {
+    console.error('[POST /api/reading/sessions] error', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
 /**
  * PATCH /api/reading/sessions/:sessionId/finish
- * 읽기 세션 종료
+ * 읽기 세션 종료 (무인증 버전)
+ *
+ * body: { user_id(or userId), end_page, actual_minutes }
  */
-router.patch(
-  '/sessions/:sessionId/finish',
-  authMiddleware,
-  async (req: AuthedRequest, res: Response) => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res
-          .status(401)
-          .json({ message: 'Unauthorized: userId not found' });
-      }
-
-      const { sessionId } = req.params;
-      const { end_page, actual_minutes } = req.body as {
-        end_page?: number;
-        actual_minutes?: number;
-      };
-
-      if (!sessionId) {
-        return res.status(400).json({ message: 'sessionId is required' });
-      }
-      if (end_page == null || typeof end_page !== 'number' || end_page <= 0) {
-        return res
-          .status(400)
-          .json({ message: 'end_page must be a positive number' });
-      }
-      if (
-        actual_minutes == null ||
-        typeof actual_minutes !== 'number' ||
-        actual_minutes <= 0
-      ) {
-        return res
-          .status(400)
-          .json({ message: 'actual_minutes must be a positive number' });
-      }
-
-      const session = await finishReadingSession({
-        userId,
-        sessionId,
-        actualEndPage: end_page,
-        durationMinutes: actual_minutes,
-      });
-
-      return res.json(session);
-    } catch (err: any) {
-      console.error('[PATCH /api/reading/sessions/:id/finish] error', err);
-      const message = err?.message ?? 'Internal server error';
-      return res.status(500).json({ message });
+router.patch('/sessions/:sessionId/finish', async (req: Request, res: Response) => {
+  try {
+    const userId = (req.body?.user_id ?? req.body?.userId) as string | undefined;
+    if (!userId) {
+      return res.status(400).json({ message: 'user_id (or userId) is required (no-auth mode)' });
     }
-  },
-);
+
+    const { sessionId } = req.params;
+    const { end_page, actual_minutes } = req.body as {
+      end_page?: number;
+      actual_minutes?: number;
+    };
+
+    if (!sessionId) return res.status(400).json({ message: 'sessionId is required' });
+
+    if (end_page == null || typeof end_page !== 'number' || end_page <= 0) {
+      return res.status(400).json({ message: 'end_page must be a positive number' });
+    }
+
+    if (actual_minutes == null || typeof actual_minutes !== 'number' || actual_minutes <= 0) {
+      return res.status(400).json({ message: 'actual_minutes must be a positive number' });
+    }
+
+    const session = await finishReadingSession({
+      userId,
+      sessionId,
+      actualEndPage: end_page,
+      durationMinutes: actual_minutes,
+    });
+
+    return res.json(session);
+  } catch (err: any) {
+    console.error('[PATCH /api/reading/sessions/:id/finish] error', err);
+    const message = err?.message ?? 'Internal server error';
+    return res.status(500).json({ message });
+  }
+});
 
 export default router;
