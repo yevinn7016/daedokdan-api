@@ -33,25 +33,6 @@ export async function searchPlacesByKeyword(query: string, size = 10): Promise<K
   const q = (query ?? "").trim();
   if (!q) return [];
 
-  const { data } = await kakao.get("/v2/local/search/keyword.json", {
-    params: { query: q, size },
-  });
-
-  const docs: KakaoPlaceDoc[] = Array.isArray(data?.documents) ? data.documents : [];
-
-  return docs.map((d) => ({
-    placeId: String(d.id),
-    name: d.place_name ?? "",
-    address: d.road_address_name || d.address_name || "",
-    lat: Number(d.y),
-    lng: Number(d.x),
-  }));
-}
-console.log("KAKAO KEY:", process.env.KAKAO_REST_API_KEY?.slice(0, 6));
-export async function searchPlacesByKeyword(query: string, size = 10): Promise<KakaoPlace[]> {
-  const q = (query ?? "").trim();
-  if (!q) return [];
-
   try {
     const { data } = await kakao.get("/v2/local/search/keyword.json", {
       params: { query: q, size },
