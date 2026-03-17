@@ -1,4 +1,3 @@
-import { firebaseAdmin } from '../clients/firebaseClient';
 import {
   deleteDeviceToken,
   getAllTokens,
@@ -10,12 +9,19 @@ export type PushPayload = {
   body: string;
 };
 
+async function getFirebaseAdmin() {
+  // firebase env가 없는 환경에서도 서버가 부팅/리스닝 되도록 lazy-load
+  const mod = await import('../clients/firebaseClient');
+  return mod.firebaseAdmin;
+}
+
 async function sendToTokens(tokens: string[], payload: PushPayload): Promise<void> {
   if (!tokens.length) {
     console.log('🔕 No FCM tokens to send');
     return;
   }
 
+  const firebaseAdmin = await getFirebaseAdmin();
   const response = await firebaseAdmin.messaging().sendEachForMulticast({
     tokens,
     notification: {
