@@ -1,4 +1,4 @@
-import { pool } from '../core/db';
+import { supabase } from "../core/db";
 
 export type UserDeviceRow = {
   id: string;
@@ -7,49 +7,55 @@ export type UserDeviceRow = {
   created_at: string;
 };
 
+// ✅ 토큰 저장 (UPSERT)
 export async function saveDeviceToken(userId: string, token: string): Promise<void> {
-  await pool.query(
-    `
-    insert into user_devices (user_id, fcm_token)
-    values ($1, $2)
-    on conflict (fcm_token)
-    do update set user_id = excluded.user_id
-    `,
-    [userId, token]
-  );
+  const { error } = await supabase
+    .from("user_devices")
+    .upsert(
+      {
+        user_id: userId,
+        fcm_token: token,
+      },
+      {
+        onConflict: "fcm_token",
+      }
+    );
+
+  if (error) throw error;
 }
 
+// ✅ 토큰 삭제
 export async function deleteDeviceToken(token: string): Promise<void> {
-  await pool.query(
-    `
-    delete from user_devices
-    where fcm_token = $1
-    `,
-    [token]
-  );
+  const { error } = await supabase
+    .from("user_devices")
+    .delete()
+    .eq("fcm_token", token);
+
+  if (error) throw error;
 }
 
+// ✅ 특정 유저 토큰 조회
 export async function getUserTokens(userId: string): Promise<string[]> {
-  const { rows } = await pool.query<{ fcm_token: string }>(
-    `
-    select fcm_token
-    from user_devices
-    where user_id = $1
-    `,
-    [userId]
-  );
+  const { data, error } = await supabase
+    .from("user_devices")
+    .select("fcm_token")
+    .eq("user_id", userId);
 
-  return rows.map((row) => row.fcm_token);
+  if (error) throw error;
+
+  return (data ?? []).map((row) => row.fcm_token);
 }
 
+// ✅ 전체 토큰 조회
 export async function getAllTokens(): Promise<string[]> {
-  const { rows } = await pool.query<{ fcm_token: string }>(
-    `
-    select distinct fcm_token
-    from user_devices
-    where fcm_token is not null
-    `
-  );
+  const { data, error } = await supabase
+    .from("user_devices")
+    .select("fcm_token")
+    .not("fcm_token", "is", null);
 
-  return rows.map((row) => row.fcm_token);
+  if (error) throw error;
+
+  // 중복 제거
+  const tokens = (data ?? []).map((row) => row.fcm_token);
+  return [...new Set(tokens)];
 }
