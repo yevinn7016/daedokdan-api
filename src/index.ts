@@ -6,29 +6,60 @@ import 'dotenv/config';
 import booksRouter from './routes/books';
 import searchRouter from './routes/search';
 import readingRouter from './routes/reading';
+import commuteRoutes from './routes/commute';
+import pushRoutes from './routes/push';
+
+// 🔥 push scheduler 추가
+import { startPushScheduler } from './services/pushScheduler';
+
 const app = express();
 
-
+/* =========================
+   Middleware
+========================= */
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+/* =========================
+   Health Check
+========================= */
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-// 📚 책 관련 (알라딘 검색, 상세 등)
-app.use('/api', booksRouter);          // => /api/search/books, /api/books/:itemId ...
+/* =========================
+   Routes
+========================= */
 
-// 🔍 검색 기록 / 최근 본 책 관련
-app.use('/api/search', searchRouter);  // => /api/search/recent, /api/search/recent-books ...
+// 📚 책 관련
+app.use('/api', booksRouter);
+
+// 🔍 검색 관련
+app.use('/api/search', searchRouter);
+
+// 📖 독서 관련
 app.use('/api/reading', readingRouter);
+
+// 🚆 통근 관련
+app.use('/api/commute', commuteRoutes);
+
+// 🔔 푸시 알림 관련 (🔥 추가)
+app.use('/api/push', pushRoutes);
+
+/* =========================
+   Scheduler (🔥 추가)
+========================= */
+startPushScheduler();
+
+/* =========================
+   Server Start
+========================= */
 const PORT = process.env.PORT || 4000;
 
 app.listen(PORT, () => {
   console.log(`🚀 daedokdan-api running on http://localhost:${PORT}`);
   console.log('🔗 search routes mounted at /api/search');
   console.log('📖 reading routes mounted at /api/reading');
+  console.log('🔔 push routes mounted at /api/push');
 });
-import commuteRoutes from "./routes/commute";
-app.use("/api/commute", commuteRoutes);
-

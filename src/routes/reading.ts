@@ -2,6 +2,7 @@
 import express, { Request, Response } from 'express';
 import * as userBooksRepository from '../repositories/userBooksRepository';
 console.log('🔥 userBooksRepository exports:', userBooksRepository);
+import { sendPush } from '../services/pushService';
 import {
   getBookshelfByUserId,
   getCurrentReadingByUserId,
@@ -20,7 +21,51 @@ import { normalizeOdsayRoutes } from '../services/odsayNormalize';
 import { supabase } from '../core/db';
 import { getBookDetailFromAladin, getBookDetailByIsbnFromAladin  } from '../clients/aladinClient';
 
+// ⭐ ODsay → 정거장 추출 함수
+function enrichSegmentsWithStations(route: any) {
+  return {
+    ...route,
+    segments: route.segments.map((seg: any, idx: number, arr: any[]) => {
 
+      // ✅ SUBWAY / BUS
+      if (seg.type === 'SUBWAY' || seg.type === 'BUS') {
+        const lane = seg.lane?.[0];
+
+        const stations =
+          lane?.passStopList?.stations?.map((s: any) => ({
+            name: s.stationName,
+            lat: Number(s.y),
+            lng: Number(s.x),
+          })) ?? [];
+
+        return {
+          ...seg,
+          stations,
+        };
+      }
+
+      // ⭐⭐ WALK 처리 추가 ⭐⭐
+      if (seg.type === 'WALK') {
+        const prevSeg = arr[idx - 1];
+        const nextSeg = arr[idx + 1];
+
+        const fromStation =
+          prevSeg?.stations?.[prevSeg.stations.length - 1] ?? null;
+
+        const toStation =
+          nextSeg?.stations?.[0] ?? null;
+
+        return {
+          ...seg,
+          fromStation, // ⭐ 시작 좌표
+          toStation,   // ⭐ 도착 좌표
+        };
+      }
+
+      return seg;
+    }),
+  };
+}
 const router = express.Router();
 
 // 인증된 요청 타입
@@ -164,6 +209,7 @@ router.post(
       const selected = routes.find(
         (r: any) => String(r.id) === String(selected_route_id),
       );
+      
 
       if (!selected) {
         return res.status(400).json({
@@ -445,10 +491,6 @@ router.post(
   },
 );
 
-/**
- * POST /api/reading/sessions
- * 읽기 세션 시작
- */
 router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -463,23 +505,10 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
       end_page,
       planned_pages,
       session_type,
-
-      // ✅ commute 선택용
       origin_place_id,
       destination_place_id,
       selected_route_id,
-    } = req.body as {
-      user_book_id?: string;
-      book_id?: string;
-      start_page?: number;
-      end_page?: number;
-      planned_pages?: number;
-      session_type?: 'commute' | 'timer';
-
-      origin_place_id?: string;
-      destination_place_id?: string;
-      selected_route_id?: string;
-    };
+    } = req.body;
 
     if (!user_book_id) return res.status(400).json({ message: 'user_book_id is required' });
     if (!book_id) return res.status(400).json({ message: 'book_id is required' });
@@ -495,11 +524,13 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
 
     const effectiveType: 'commute' | 'timer' = session_type ?? 'timer';
 
-    // ✅ COMMUTE 세션: 선택 경로 저장 포함
+    // =========================
+    // 🚇 COMMUTE 세션
+    // =========================
     if (effectiveType === 'commute') {
       if (!origin_place_id || !destination_place_id || !selected_route_id) {
         return res.status(400).json({
-          message: 'origin_place_id, destination_place_id, selected_route_id are required for commute session',
+          message: 'origin_place_id, destination_place_id, selected_route_id are required',
         });
       }
 
@@ -508,10 +539,11 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
 
       if (!origin || !dest || origin.lat == null || origin.lng == null || dest.lat == null || dest.lng == null) {
         return res.status(400).json({
-          message: 'placeId not found or missing lat/lng. Please call /api/commute/places/search first.',
+          message: 'placeId not found or missing lat/lng',
         });
       }
 
+      // ✅ ODsay 호출
       const raw = await searchPubTransRoutes({
         sx: Number(origin.lng),
         sy: Number(origin.lat),
@@ -527,10 +559,15 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
 
       const routes = normalized.routes ?? [];
       const selected = routes.find((r: any) => String(r.id) === String(selected_route_id));
+
       if (!selected) {
-        return res.status(400).json({ message: `selected_route_id not found: ${selected_route_id}` });
+        return res.status(400).json({ message: `selected_route_id not found` });
       }
 
+      // ⭐⭐⭐ 핵심 추가 부분 ⭐⭐⭐
+      const enrichedRoute = enrichSegmentsWithStations(selected);
+
+      // ✅ 세션 저장
       const session = await createReadingSession({
         userId,
         userBookId: user_book_id,
@@ -541,22 +578,30 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
         sessionType: 'commute',
         commuteProfileId: null,
 
-        // ✅ 저장 필드들 (repo 확장한 최종본 기준)
         originPlaceId: String(origin_place_id),
         destinationPlaceId: String(destination_place_id),
         selectedRouteId: String(selected_route_id),
 
-        commuteTotalMinutes: selected.totalMinutes ?? null,
-        commuteWalkMinutes: selected.walkMinutes ?? null,
-        commuteTransfers: selected.transfers ?? null,
-        commuteFare: selected.fare ?? null,
-        commuteRouteJson: selected,
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destinationLat: dest.lat,
+        destinationLng: dest.lng,
+
+        commuteTotalMinutes: enrichedRoute.totalMinutes ?? null,
+        commuteWalkMinutes: enrichedRoute.walkMinutes ?? null,
+        commuteTransfers: enrichedRoute.transfers ?? null,
+        commuteFare: enrichedRoute.fare ?? null,
+
+        // ⭐ 변경된 부분
+        commuteRouteJson: enrichedRoute,
       });
 
       return res.status(201).json(session);
     }
 
-    // ✅ TIMER 세션 (기존)
+    // =========================
+    // ⏱ TIMER 세션
+    // =========================
     const session = await createReadingSession({
       userId,
       userBookId: user_book_id,
@@ -569,12 +614,12 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
     });
 
     return res.status(201).json(session);
+
   } catch (err) {
     console.error('[POST /api/reading/sessions] error', err);
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
-
 /**
  * PATCH /api/reading/sessions/:sessionId/finish
  * 읽기 세션 종료

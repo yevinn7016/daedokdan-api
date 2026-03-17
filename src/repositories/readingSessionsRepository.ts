@@ -29,6 +29,11 @@ export interface ReadingSession {
   destinationPlaceId: string | null;
   selectedRouteId: string | null;
 
+  originLat: number | null;
+  originLng: number | null;
+  destinationLat: number | null;
+  destinationLng: number | null;
+
   commuteTotalMinutes: number | null;
   commuteWalkMinutes: number | null;
   commuteTransfers: number | null;
@@ -54,11 +59,19 @@ export interface CreateSessionInput {
   destinationPlaceId?: string;
   selectedRouteId?: string;
 
+  originLat?: number | null;
+  originLng?: number | null;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
+
   commuteTotalMinutes?: number | null;
   commuteWalkMinutes?: number | null;
   commuteTransfers?: number | null;
   commuteFare?: number | null;
   commuteRouteJson?: any;
+
+  /** commute 세션: 총시간 - 도보 - 환승×3 - 도착정리(3분) = 실제 읽기 가능 시간 */
+  effectiveMinutes?: number | null;
 }
 
 export interface FinishSessionInput {
@@ -95,6 +108,11 @@ function mapRowToSession(row: any): ReadingSession {
     destinationPlaceId: row.destination_place_id ?? null,
     selectedRouteId: row.selected_route_id ?? null,
 
+    originLat: row.origin_lat != null ? Number(row.origin_lat) : null,
+    originLng: row.origin_lng != null ? Number(row.origin_lng) : null,
+    destinationLat: row.destination_lat != null ? Number(row.destination_lat) : null,
+    destinationLng: row.destination_lng != null ? Number(row.destination_lng) : null,
+
     commuteTotalMinutes: row.commute_total_minutes != null ? Number(row.commute_total_minutes) : null,
     commuteWalkMinutes: row.commute_walk_minutes != null ? Number(row.commute_walk_minutes) : null,
     commuteTransfers: row.commute_transfers != null ? Number(row.commute_transfers) : null,
@@ -126,6 +144,10 @@ const SESSION_SELECT = `
   origin_place_id,
   destination_place_id,
   selected_route_id,
+  origin_lat,
+  origin_lng,
+  destination_lat,
+  destination_lng,
   commute_total_minutes,
   commute_walk_minutes,
   commute_transfers,
@@ -152,11 +174,16 @@ export async function createReadingSession(params: CreateSessionInput): Promise<
     originPlaceId,
     destinationPlaceId,
     selectedRouteId,
+    originLat = null,
+    originLng = null,
+    destinationLat = null,
+    destinationLng = null,
     commuteTotalMinutes = null,
     commuteWalkMinutes = null,
     commuteTransfers = null,
     commuteFare = null,
     commuteRouteJson = null,
+    effectiveMinutes: effectiveMinutesParam = null,
   } = params;
 
   const nowIso = new Date().toISOString();
@@ -194,11 +221,19 @@ export async function createReadingSession(params: CreateSessionInput): Promise<
     insertRow.destination_place_id = destinationPlaceId ?? null;
     insertRow.selected_route_id = selectedRouteId ?? null;
 
+    insertRow.origin_lat = originLat;
+    insertRow.origin_lng = originLng;
+    insertRow.destination_lat = destinationLat;
+    insertRow.destination_lng = destinationLng;
+
     insertRow.commute_total_minutes = commuteTotalMinutes;
     insertRow.commute_walk_minutes = commuteWalkMinutes;
     insertRow.commute_transfers = commuteTransfers;
     insertRow.commute_fare = commuteFare;
     insertRow.commute_route_json = commuteRouteJson;
+    if (effectiveMinutesParam != null) {
+      insertRow.effective_minutes = Math.max(0, effectiveMinutesParam);
+    }
   }
 
   const { data, error } = await supabase
