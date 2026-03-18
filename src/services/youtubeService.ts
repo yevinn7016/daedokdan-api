@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosResponse } from "axios";
 import { supabase } from "../core/db";
 
 type YoutubeVideosResponse = {
@@ -23,6 +23,10 @@ const PLAYLISTS = [
     id: "PL4-UCyPXds6_XUO9n1ZCITEH6CIc_9Xs2",
     title: "책 추천이 필요해? 들어와",
   },
+  {
+    id: "PLUpgTv3bu9rGxQBAMVaMvam27P0YbiY29",
+    title: "이동진이 추천하는 책 모음",
+  },
 ];
 
 // duration 변환
@@ -44,7 +48,7 @@ function formatDuration(duration: string) {
 
 // videos API
 async function fetchVideoDetails(videoIds: string[]) {
-  const res = await axios.get<YoutubeVideosResponse>(
+  const res: AxiosResponse<YoutubeVideosResponse> = await axios.get(
     "https://www.googleapis.com/youtube/v3/videos",
     {
       params: {
@@ -73,7 +77,7 @@ async function fetchAllVideosFromPlaylist(playlistId: string) {
   let nextPageToken: string | undefined = undefined;
 
   do {
-    const res = await axios.get<YoutubePlaylistItemsResponse>(
+    const res: AxiosResponse<YoutubePlaylistItemsResponse> = await axios.get(
       "https://www.googleapis.com/youtube/v3/playlistItems",
       {
         params: {
@@ -148,6 +152,7 @@ export async function getYoutubeVideosFromDB() {
   const PLAYLIST_MAP: Record<string, string> = {
     "PL4-UCyPXds6-f_9i8Xgqg2LrE0ddPmiH0": "다들 뭐 봐? 책장 엿보기",
     "PL4-UCyPXds6_XUO9n1ZCITEH6CIc_9Xs2": "책 추천이 필요해? 들어와",
+    "PLUpgTv3bu9rGxQBAMVaMvam27P0YbiY29": "이동진이 추천하는 책 모음",
   };
 
   const grouped: Record<string, any[]> = {};
