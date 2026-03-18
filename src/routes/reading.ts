@@ -582,11 +582,6 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
         destinationPlaceId: String(destination_place_id),
         selectedRouteId: String(selected_route_id),
 
-        originLat: origin.lat,
-        originLng: origin.lng,
-        destinationLat: dest.lat,
-        destinationLng: dest.lng,
-
         commuteTotalMinutes: enrichedRoute.totalMinutes ?? null,
         commuteWalkMinutes: enrichedRoute.walkMinutes ?? null,
         commuteTransfers: enrichedRoute.transfers ?? null,
@@ -596,7 +591,13 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
         commuteRouteJson: enrichedRoute,
       });
 
-      return res.status(201).json(session);
+      return res.status(201).json({
+        ...session,
+        originLat: origin.lat,
+        originLng: origin.lng,
+        destinationLat: dest.lat,
+        destinationLng: dest.lng,
+      });
     }
 
     // =========================
