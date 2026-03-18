@@ -41,6 +41,19 @@ app.use('/api/search', searchRouter);
 // 📖 독서 관련
 app.use('/api/reading', readingRouter);
 
+import { startYoutubeScheduler } from "./services/youtubeScheduler";
+
+// 기존 코드 아래에 추가
+startYoutubeScheduler();
+
+import bookPickRoutes from "./routes/bookPick";
+
+app.use("/api/book-picks", bookPickRoutes);
+
+
+
+// 🔥 스케줄러 시작
+startYoutubeScheduler();
 // 🚆 통근 관련
 app.use('/api/commute', commuteRoutes);
 
