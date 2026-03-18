@@ -1,6 +1,19 @@
 import axios from "axios";
 import { supabase } from "../core/db";
 
+type YoutubeVideosResponse = {
+  items: Array<{
+    id: string;
+    contentDetails: { duration: string };
+    snippet: { description: string };
+  }>;
+};
+
+type YoutubePlaylistItemsResponse = {
+  items: any[];
+  nextPageToken?: string;
+};
+
 const PLAYLISTS = [
   {
     id: "PL4-UCyPXds6-f_9i8Xgqg2LrE0ddPmiH0",
@@ -31,7 +44,7 @@ function formatDuration(duration: string) {
 
 // videos API
 async function fetchVideoDetails(videoIds: string[]) {
-  const res = await axios.get(
+  const res = await axios.get<YoutubeVideosResponse>(
     "https://www.googleapis.com/youtube/v3/videos",
     {
       params: {
@@ -60,7 +73,7 @@ async function fetchAllVideosFromPlaylist(playlistId: string) {
   let nextPageToken: string | undefined = undefined;
 
   do {
-    const res = await axios.get(
+    const res = await axios.get<YoutubePlaylistItemsResponse>(
       "https://www.googleapis.com/youtube/v3/playlistItems",
       {
         params: {
