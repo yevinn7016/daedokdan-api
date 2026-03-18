@@ -46,7 +46,9 @@ app.use('/api/commute', commuteRoutes);
 
 // 🔔 푸시 알림 관련 (🔥 추가)
 app.use('/api/push', pushRoutes);
+import rankingRoutes from "./routes/ranking";
 
+app.use("/api/ranking", rankingRoutes);
 /* =========================
    Scheduler (🔥 추가)
 ========================= */

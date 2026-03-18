@@ -75,3 +75,42 @@ export async function getBookDetailByIsbnFromAladin(isbn13: string) {
   const data = await res.json();
   return data;
 }
+// src/clients/aladinClient.ts
+
+
+
+// src/clients/aladinClient.ts
+// src/clients/aladinClient.ts
+
+import axios from "axios";
+import { parseStringPromise } from "xml2js";
+import { config } from "../core/config";
+
+// 🔥 베스트셀러 (랭킹용)
+export async function fetchBestSellers() {
+  const url = "https://www.aladin.co.kr/ttb/api/ItemList.aspx";
+
+  const res = await axios.get(url, {
+    params: {
+      TTBKey: config.aladinTtbKey,
+      QueryType: "Bestseller",
+      MaxResults: 10,
+      start: 1,
+      SearchTarget: "Book",
+      Output: "XML",
+      Version: "20131101",
+    },
+    headers: {
+      "User-Agent": "Mozilla/5.0", // 🔥 핵심
+    },
+    responseType: "text",
+  });
+
+  console.log("🔥 raw XML:", res.data);
+
+  const parsed = await parseStringPromise(res.data);
+
+  console.log("🔥 parsed:", parsed);
+
+  return parsed?.object?.item ?? [];
+}
