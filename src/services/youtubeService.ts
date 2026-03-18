@@ -1,4 +1,4 @@
-import axios, { type AxiosResponse } from "axios";
+import axios from "axios";
 import { supabase } from "../core/db";
 
 type YoutubeVideosResponse = {
@@ -48,7 +48,7 @@ function formatDuration(duration: string) {
 
 // videos API
 async function fetchVideoDetails(videoIds: string[]) {
-  const res: AxiosResponse<YoutubeVideosResponse> = await axios.get(
+  const res = await axios.get<YoutubeVideosResponse>(
     "https://www.googleapis.com/youtube/v3/videos",
     {
       params: {
@@ -77,7 +77,7 @@ async function fetchAllVideosFromPlaylist(playlistId: string) {
   let nextPageToken: string | undefined = undefined;
 
   do {
-    const res: AxiosResponse<YoutubePlaylistItemsResponse> = await axios.get(
+    const res = await axios.get<YoutubePlaylistItemsResponse>(
       "https://www.googleapis.com/youtube/v3/playlistItems",
       {
         params: {
