@@ -12,7 +12,7 @@ import { recommendPortion } from '../services/recommendationService';
 import * as readingSessionsRepository from '../repositories/readingSessionsRepository';
 console.log('🔥 readingSessionsRepository exports:', readingSessionsRepository);
 const { createReadingSession, finishReadingSession } = readingSessionsRepository;
-import { getPlaceById } from '../repositories/placesCacheRepository';
+import { getPlaceById, type CachedPlace } from '../repositories/placesCacheRepository';
 // ✅ auth 미들웨어
 import { authMiddleware } from '../middlewares/auth';
 import { searchPubTransRoutes } from '../services/odsayService';
@@ -66,6 +66,29 @@ function enrichSegmentsWithStations(route: any) {
     }),
   };
 }
+
+/** places_cache 미스 시, 클라이언트가 함께 보낸 좌표로 통근 경로(ODsay)만 계산 */
+async function resolvePlaceForCommute(
+  placeId: string,
+  fallbackLat: unknown,
+  fallbackLng: unknown,
+): Promise<CachedPlace | null> {
+  const row = await getPlaceById(placeId);
+  if (row && row.lat != null && row.lng != null) return row;
+
+  const lat = fallbackLat != null ? Number(fallbackLat) : NaN;
+  const lng = fallbackLng != null ? Number(fallbackLng) : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return {
+    place_id: placeId,
+    name: row?.name ?? null,
+    address: row?.address ?? null,
+    lat,
+    lng,
+  };
+}
+
 const router = express.Router();
 
 // 인증된 요청 타입
@@ -508,6 +531,10 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
       origin_place_id,
       destination_place_id,
       selected_route_id,
+      originLat,
+      originLng,
+      destinationLat,
+      destinationLng,
     } = req.body;
 
     if (!user_book_id) return res.status(400).json({ message: 'user_book_id is required' });
@@ -534,12 +561,21 @@ router.post('/sessions', authMiddleware, async (req: AuthedRequest, res: Respons
         });
       }
 
-      const origin = await getPlaceById(String(origin_place_id));
-      const dest = await getPlaceById(String(destination_place_id));
+      const origin = await resolvePlaceForCommute(
+        String(origin_place_id),
+        originLat,
+        originLng,
+      );
+      const dest = await resolvePlaceForCommute(
+        String(destination_place_id),
+        destinationLat,
+        destinationLng,
+      );
 
-      if (!origin || !dest || origin.lat == null || origin.lng == null || dest.lat == null || dest.lng == null) {
+      if (!origin || !dest) {
         return res.status(400).json({
-          message: 'placeId not found or missing lat/lng',
+          message:
+            'placeId not found or missing lat/lng. Cache places on the server, or send originLat/originLng and destinationLat/destinationLng.',
         });
       }
 
