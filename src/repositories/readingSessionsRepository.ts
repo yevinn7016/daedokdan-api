@@ -35,6 +35,12 @@ export interface ReadingSession {
   commuteFare: number | null;
   commuteRouteJson: any | null;
 
+  /** 세션 시점 출발/도착 좌표 (places_cache 또는 클라이언트/경로 폴백) */
+  originLat: number | null;
+  originLng: number | null;
+  destinationLat: number | null;
+  destinationLng: number | null;
+
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -59,6 +65,11 @@ export interface CreateSessionInput {
   commuteTransfers?: number | null;
   commuteFare?: number | null;
   commuteRouteJson?: any;
+
+  originLat?: number | null;
+  originLng?: number | null;
+  destinationLat?: number | null;
+  destinationLng?: number | null;
 }
 
 export interface FinishSessionInput {
@@ -101,6 +112,11 @@ function mapRowToSession(row: any): ReadingSession {
     commuteFare: row.commute_fare != null ? Number(row.commute_fare) : null,
     commuteRouteJson: row.commute_route_json ?? null,
 
+    originLat: row.origin_lat != null ? Number(row.origin_lat) : null,
+    originLng: row.origin_lng != null ? Number(row.origin_lng) : null,
+    destinationLat: row.destination_lat != null ? Number(row.destination_lat) : null,
+    destinationLng: row.destination_lng != null ? Number(row.destination_lng) : null,
+
     createdAt: row.created_at ?? null,
     updatedAt: row.updated_at ?? null,
   };
@@ -132,6 +148,11 @@ const SESSION_SELECT = `
   commute_fare,
   commute_route_json,
 
+  origin_lat,
+  origin_lng,
+  destination_lat,
+  destination_lng,
+
   created_at,
   updated_at
 `;
@@ -157,6 +178,11 @@ export async function createReadingSession(params: CreateSessionInput): Promise<
     commuteTransfers = null,
     commuteFare = null,
     commuteRouteJson = null,
+
+    originLat: inputOriginLat = null,
+    originLng: inputOriginLng = null,
+    destinationLat: inputDestinationLat = null,
+    destinationLng: inputDestinationLng = null,
   } = params;
 
   const nowIso = new Date().toISOString();
@@ -199,6 +225,11 @@ export async function createReadingSession(params: CreateSessionInput): Promise<
     insertRow.commute_transfers = commuteTransfers;
     insertRow.commute_fare = commuteFare;
     insertRow.commute_route_json = commuteRouteJson;
+
+    insertRow.origin_lat = inputOriginLat;
+    insertRow.origin_lng = inputOriginLng;
+    insertRow.destination_lat = inputDestinationLat;
+    insertRow.destination_lng = inputDestinationLng;
   }
 
   const { data, error } = await supabase
