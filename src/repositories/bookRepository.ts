@@ -49,3 +49,30 @@ export async function upsertBooksFromAladinItems(items: any[]) {
     throw error;
   }
 }
+// src/repositories/bookRepository.ts
+
+import { supabase } from "../core/db";
+
+export async function findBooksByPageRange(
+  min: number,
+  max?: number,
+  limit: number = 20
+) {
+  let query = supabase
+    .from("books")
+    .select("*")
+    .gte("page_count", min)
+    .limit(limit);
+
+  if (max) {
+    query = query.lte("page_count", max);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ?? [];
+}

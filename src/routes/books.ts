@@ -76,6 +76,36 @@ router.get(
     }
   },
 );
+// src/routes/books.ts
+
+import express from "express";
+import { getBooksByPageRange } from "../services/recommendationService";
+
+
+
+// GET /api/books/by-pages?range=0-100
+router.get("/by-pages", async (req, res) => {
+  try {
+    const { range = "0-100", limit = "10" } = req.query;
+
+    const books = await getBooksByPageRange(
+      String(range),
+      Number(limit)
+    );
+
+    res.json({
+      success: true,
+      data: { books },
+      error: null,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      data: null,
+      error: error.message,
+    });
+  }
+});
 
 /**
  * GET /api/books/:itemId
@@ -83,7 +113,7 @@ router.get(
  * - book_details 저장 + books 업데이트 + 최근 본 책 기록 + 판매처 링크 포함
  */
 router.get(
-  '/books/:itemId',
+  '/:itemId',
   authMiddleware,
   async (req: AuthedRequest, res: Response) => {
     const { itemId } = req.params;
@@ -316,5 +346,6 @@ router.get(
     }
   },
 );
+
 
 export default router;

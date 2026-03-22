@@ -51,6 +51,7 @@ import bookPickRoutes from "./routes/bookPick";
 app.use("/api/book-picks", bookPickRoutes);
 
 
+app.use("/api/books", booksRouter);
 
 // 🔥 스케줄러 시작
 startYoutubeScheduler();
