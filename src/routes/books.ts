@@ -1,9 +1,14 @@
 // src/routes/books.ts
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import 'dotenv/config';
 
-import { searchBooksFromAladin, getBookDetailFromAladin } from '../clients/aladinClient';
+
+import {
+  searchBooksFromAladin,
+  getBookDetailFromAladin,
+  getBookDetailByIsbnFromAladin,
+} from '../clients/aladinClient';
 import { fetchGoogleBook } from '../clients/googleBooksClient';
 import { upsertBooksFromAladinItems } from '../repositories/bookRepository';
 import { saveRecentSearch } from '../repositories/searchRepository';
@@ -115,14 +120,19 @@ router.get("/by-pages", async (req, res) => {
 router.get(
   '/:itemId',
   authMiddleware,
-  async (req: AuthedRequest, res: Response) => {
+  async (req: AuthedRequest, res: Response, next: NextFunction) => {
     const { itemId } = req.params;
+    if (!/^\d+$/.test(itemId)) {
+      return next();
+    }
 
     try {
-      const { data: book, error: bookErr } = await supabase
+      let detailItem: any | null = null;
+
+      const { data: initialBook, error: bookErr } = await supabase
         .from('books')
         .select('*')
-        .eq('aladin_item_id', itemId)
+        .or(`aladin_item_id.eq.${itemId},isbn13.eq.${itemId}`)
         .maybeSingle();
 
       if (bookErr) {
@@ -130,11 +140,37 @@ router.get(
         return res.status(500).json({ message: 'Database error (books)' });
       }
 
+      let book: any = initialBook;
       if (!book) {
-        return res.status(404).json({
-          message:
-            'Book not found in local DB. 먼저 /api/search/books 로 검색해서 저장해야 합니다.',
-        });
+        // DB에 없으면 알라딘 상세로 즉시 조회 후 books upsert 시도
+        let bootstrapRaw = await getBookDetailFromAladin(itemId);
+        if ((!bootstrapRaw?.item || bootstrapRaw.item.length === 0) && /^\d{13}$/.test(itemId)) {
+          bootstrapRaw = await getBookDetailByIsbnFromAladin(itemId);
+        }
+        detailItem = bootstrapRaw.item && bootstrapRaw.item[0];
+
+        if (!detailItem) {
+          return res.status(404).json({ message: 'No detail info from Aladin' });
+        }
+
+        await upsertBooksFromAladinItems([detailItem]);
+
+        const { data: hydratedBook, error: hydrateErr } = await supabase
+          .from('books')
+          .select('*')
+          .or(`aladin_item_id.eq.${itemId},isbn13.eq.${itemId}`)
+          .maybeSingle();
+
+        if (hydrateErr) {
+          console.error('❌ books reselect error after upsert', hydrateErr);
+          return res.status(500).json({ message: 'Database error (books)' });
+        }
+
+        if (!hydratedBook) {
+          return res.status(404).json({ message: 'Failed to persist book from Aladin' });
+        }
+
+        book = hydratedBook;
       }
 
       const bookId = (book as any).id as string;
@@ -161,9 +197,15 @@ router.get(
         console.error('❌ book_details select error', detailErr);
       }
 
-      // 알라딘 상세
-      const raw = await getBookDetailFromAladin(itemId);
-      const detailItem = raw.item && raw.item[0];
+      // 알라딘 상세 (초기 부트스트랩에서 이미 조회했다면 재사용)
+      if (!detailItem) {
+        const lookupId = String((book as any).aladin_item_id ?? itemId);
+        let raw = await getBookDetailFromAladin(lookupId);
+        if ((!raw?.item || raw.item.length === 0) && (book as any).isbn13) {
+          raw = await getBookDetailByIsbnFromAladin(String((book as any).isbn13));
+        }
+        detailItem = raw.item && raw.item[0];
+      }
 
       if (!detailItem) {
         return res.status(404).json({ message: 'No detail info from Aladin' });
@@ -347,5 +389,124 @@ router.get(
   },
 );
 
+import { fetchBooks, fetchBooksByCategory } from "../services/aladinService";
+import { upsertBooks } from "../repositories/bookRepository";
 
+
+
+/**
+ * 📚 카테고리별 책 조회 API
+ * GET /api/books/category?categoryId=51391
+ */
+router.get("/category", async (req, res) => {
+  try {
+    const categoryId = Number(req.query.categoryId);
+
+    if (!categoryId) {
+      return res.status(400).json({
+        success: false,
+        error: "categoryId required",
+      });
+    }
+
+    // 1️⃣ 알라딘에서 가져오기
+    const booksFromAladin = await fetchBooksByCategory(categoryId);
+
+    // 2️⃣ DB 저장 (중복 방지)
+    const savedBooks = await upsertBooks(booksFromAladin);
+
+    // 3️⃣ 응답 구조 맞추기
+    const result = savedBooks.map((book: any) => ({
+      id: book.id,
+      isbn13: book.isbn13,
+      title: book.title,
+      authors: book.authors,
+      publisher: book.publisher,
+      published_date: book.published_date,
+      page_count: book.page_count,
+      language: book.language,
+      categories: book.categories,
+      thumbnail_url: book.thumbnail_url,
+      google_books_id: book.google_books_id,
+      created_at: book.created_at,
+      aladin_item_id: book.aladin_item_id,
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        books: result,
+      },
+      error: null,
+    });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+import { CATEGORY_MAP } from "../config/categoryMap";
+
+
+router.get("/sections", async (req, res) => {
+  try {
+    const categoryKey = req.query.category as keyof typeof CATEGORY_MAP;
+
+    const category = CATEGORY_MAP[categoryKey];
+
+    if (!category) {
+      return res.status(400).json({
+        success: false,
+        error: "invalid category",
+      });
+    }
+
+    const ids = category.ids;
+
+    // 🔥 병렬 호출
+    const results = await Promise.all(
+      ids.map(async (id: number) => {
+        const [newBooks, bestBooks] = await Promise.all([
+          fetchBooks(id, "ItemNewAll"),
+          fetchBooks(id, "Bestseller"),
+        ]);
+
+        return {
+          newBooks,
+          bestBooks,
+        };
+      })
+    );
+
+    // 🔥 합치기
+    const newBooks = results.flatMap((r) => r.newBooks).slice(0, 20);
+    const bestBooks = results.flatMap((r) => r.bestBooks).slice(0, 20);
+
+    res.json({
+      success: true,
+      data: {
+        category: category.name,
+        sections: [
+          {
+            title: `${category.name} 신작`,
+            books: newBooks,
+          },
+          {
+            title: `${category.name} 베스트`,
+            books: bestBooks,
+          },
+        ],
+      },
+    });
+
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
 export default router;

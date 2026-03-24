@@ -64,3 +64,14 @@ export async function findBooksByPageRange(
 
   return data ?? [];
 }
+
+export async function upsertBooks(books: any[]) {
+  const { data, error } = await supabase
+    .from("books")
+    .upsert(books, { onConflict: "aladin_item_id" })
+    .select();
+
+  if (error) throw error;
+
+  return data;
+}

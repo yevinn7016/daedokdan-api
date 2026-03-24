@@ -58,6 +58,8 @@ startYoutubeScheduler();
 // 🚆 통근 관련
 app.use('/api/commute', commuteRoutes);
 
+
+app.use("/api/books", booksRouter);
 // 🔔 푸시 알림 관련 (🔥 추가)
 app.use('/api/push', pushRoutes);
 import rankingRoutes from "./routes/ranking";
