@@ -277,13 +277,13 @@ router.get(
         (detailRow?.description ?? null);
 
       const finalAuthorIntro: string | null =
-        (authorIntro && authorIntro.trim()) ??
-        (detailRow?.author_intro ?? null) ??
+        authorIntro?.trim() ||
+        detailRow?.author_intro ||
         null;
 
       const finalPublisherReview: string | null =
-        aladinPublisherReview ??
-        (detailRow?.publisher_review ?? null) ??
+        aladinPublisherReview ||
+        detailRow?.publisher_review ||
         null;
 
       let finalPageCount: number | null = (book as any).page_count ?? null;

@@ -31,6 +31,10 @@ function mapRowToSession(row) {
         commuteTransfers: row.commute_transfers != null ? Number(row.commute_transfers) : null,
         commuteFare: row.commute_fare != null ? Number(row.commute_fare) : null,
         commuteRouteJson: (_o = row.commute_route_json) !== null && _o !== void 0 ? _o : null,
+        originLat: row.origin_lat != null ? Number(row.origin_lat) : null,
+        originLng: row.origin_lng != null ? Number(row.origin_lng) : null,
+        destinationLat: row.destination_lat != null ? Number(row.destination_lat) : null,
+        destinationLng: row.destination_lng != null ? Number(row.destination_lng) : null,
         createdAt: (_p = row.created_at) !== null && _p !== void 0 ? _p : null,
         updatedAt: (_q = row.updated_at) !== null && _q !== void 0 ? _q : null,
     };
@@ -61,6 +65,11 @@ const SESSION_SELECT = `
   commute_fare,
   commute_route_json,
 
+  origin_lat,
+  origin_lng,
+  destination_lat,
+  destination_lng,
+
   created_at,
   updated_at
 `;
@@ -68,7 +77,7 @@ const SESSION_SELECT = `
 async function createReadingSession(params) {
     const { userId, userBookId, bookId, startPage, endPage, plannedPages, sessionType = 'commute', commuteProfileId = null, 
     // ✅ commute 선택정보
-    originPlaceId, destinationPlaceId, selectedRouteId, commuteTotalMinutes = null, commuteWalkMinutes = null, commuteTransfers = null, commuteFare = null, commuteRouteJson = null, } = params;
+    originPlaceId, destinationPlaceId, selectedRouteId, commuteTotalMinutes = null, commuteWalkMinutes = null, commuteTransfers = null, commuteFare = null, commuteRouteJson = null, originLat: inputOriginLat = null, originLng: inputOriginLng = null, destinationLat: inputDestinationLat = null, destinationLng: inputDestinationLng = null, } = params;
     const nowIso = new Date().toISOString();
     const pages = plannedPages !== null && plannedPages !== void 0 ? plannedPages : Math.max(1, endPage - startPage + 1);
     // ✅ commute일 때는 선택정보가 들어오는지 검증(원하면 routes에서 이미 검증했으니 약하게 할 수도 있음)
@@ -100,6 +109,10 @@ async function createReadingSession(params) {
         insertRow.commute_transfers = commuteTransfers;
         insertRow.commute_fare = commuteFare;
         insertRow.commute_route_json = commuteRouteJson;
+        insertRow.origin_lat = inputOriginLat;
+        insertRow.origin_lng = inputOriginLng;
+        insertRow.destination_lat = inputDestinationLat;
+        insertRow.destination_lng = inputDestinationLng;
     }
     const { data, error } = await db_1.supabase
         .from('reading_sessions')

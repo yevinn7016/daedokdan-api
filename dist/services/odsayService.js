@@ -6,36 +6,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.searchPubTransRoutes = searchPubTransRoutes;
 // src/services/odsayService.ts
 const axios_1 = __importDefault(require("axios"));
-function sanitizeApiKey(v) {
+function sanitizeBaseUrl(v) {
     if (typeof v !== "string")
         return "";
-    const trimmed = v.trim();
-    // .env에 ODSAY_API_KEY="xxxxx" 형태로 들어가서 따옴표가 값에 포함되는 경우 방지
-    const unquoted = trimmed.replace(/^['"](.+)['"]$/, "$1").trim();
-    return unquoted;
+    return v.trim().replace(/\/+$/, "");
 }
-const ODSAY_API_KEY = sanitizeApiKey(process.env.ODSAY_API_KEY);
-if (!ODSAY_API_KEY)
-    throw new Error("Missing env: ODSAY_API_KEY");
-const odsay = axios_1.default.create({
-    baseURL: "https://api.odsay.com/v1/api",
-    timeout: 8000,
-});
+console.log("[odsay] process.env.ODSAY_PROXY_URL =", process.env.ODSAY_PROXY_URL);
+const ODSAY_PROXY_URL = sanitizeBaseUrl(process.env.ODSAY_PROXY_URL);
+if (!ODSAY_PROXY_URL)
+    throw new Error("Missing env: ODSAY_PROXY_URL");
+console.log("[odsay] sanitized proxy base =", ODSAY_PROXY_URL);
+const PROXY_TIMEOUT_MS = 30000;
 async function searchPubTransRoutes(params) {
     const { sx, sy, ex, ey, lang = 0 } = params;
-    const { data } = await odsay.get("/searchPubTransPath", {
+    console.log("🔥 EC2 호출 시작", `${ODSAY_PROXY_URL}/odsay/searchPubTransPath`);
+    const { data } = await axios_1.default.get(`${ODSAY_PROXY_URL}/odsay/searchPubTransPath`, {
         params: {
-            apiKey: ODSAY_API_KEY,
-            SX: sx,
-            SY: sy,
-            EX: ex,
-            EY: ey,
+            sx,
+            sy,
+            ex,
+            ey,
             lang,
-            OPT: 0
         },
-        headers: {
-            "x-forwarded-for": undefined,
-        },
+        timeout: PROXY_TIMEOUT_MS,
     });
     return data;
 }

@@ -36,8 +36,17 @@ app.use('/api', books_1.default);
 app.use('/api/search', search_1.default);
 // 📖 독서 관련
 app.use('/api/reading', reading_1.default);
+const youtubeScheduler_1 = require("./services/youtubeScheduler");
+// 기존 코드 아래에 추가
+(0, youtubeScheduler_1.startYoutubeScheduler)();
+const bookPick_1 = __importDefault(require("./routes/bookPick"));
+app.use("/api/book-picks", bookPick_1.default);
+app.use("/api/books", books_1.default);
+// 🔥 스케줄러 시작
+(0, youtubeScheduler_1.startYoutubeScheduler)();
 // 🚆 통근 관련
 app.use('/api/commute', commute_1.default);
+app.use("/api/books", books_1.default);
 // 🔔 푸시 알림 관련 (🔥 추가)
 app.use('/api/push', push_1.default);
 const ranking_1 = __importDefault(require("./routes/ranking"));

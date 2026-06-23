@@ -53,6 +53,7 @@ const odsayNormalize_1 = require("../services/odsayNormalize");
 // 🔹 page_count 보정용
 const db_1 = require("../core/db");
 const aladinClient_1 = require("../clients/aladinClient");
+const apiDebugLog_1 = require("../utils/apiDebugLog");
 // ⭐ ODsay → 정거장 추출 함수
 function enrichSegmentsWithStations(route) {
     return {
@@ -86,6 +87,68 @@ function enrichSegmentsWithStations(route) {
             }
             return seg;
         }),
+    };
+}
+/** 요청 본문에서 좌표 후보(snake·camel 혼용) 중 첫 유효값 */
+function pickCoord(...vals) {
+    for (const v of vals) {
+        if (v == null || v === '')
+            continue;
+        const n = typeof v === 'number' ? v : Number(v);
+        if (Number.isFinite(n))
+            return n;
+    }
+    return null;
+}
+/**
+ * commute_route_json(enrichedRoute)에서 첫 fromStation·마지막 toStation 좌표
+ * (endpoint DB 컬럼 폴백; 정류장 기준 근사치)
+ */
+function coordsFromEnrichedRoute(route) {
+    var _a;
+    const segments = route === null || route === void 0 ? void 0 : route.segments;
+    if (!Array.isArray(segments) || segments.length === 0)
+        return null;
+    let oLat = null;
+    let oLng = null;
+    for (const seg of segments) {
+        const s = seg === null || seg === void 0 ? void 0 : seg.fromStation;
+        if (s != null && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))) {
+            oLat = Number(s.lat);
+            oLng = Number(s.lng);
+            break;
+        }
+    }
+    let dLat = null;
+    let dLng = null;
+    for (let i = segments.length - 1; i >= 0; i--) {
+        const s = (_a = segments[i]) === null || _a === void 0 ? void 0 : _a.toStation;
+        if (s != null && Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lng))) {
+            dLat = Number(s.lat);
+            dLng = Number(s.lng);
+            break;
+        }
+    }
+    if (oLat == null || oLng == null || dLat == null || dLng == null)
+        return null;
+    return { originLat: oLat, originLng: oLng, destinationLat: dLat, destinationLng: dLng };
+}
+/** places_cache 미스 시, 클라이언트가 함께 보낸 좌표로 통근 경로(ODsay)만 계산 */
+async function resolvePlaceForCommute(placeId, fallbackLat, fallbackLng) {
+    var _a, _b;
+    const row = await (0, placesCacheRepository_1.getPlaceById)(placeId);
+    if (row && row.lat != null && row.lng != null)
+        return row;
+    const lat = pickCoord(fallbackLat);
+    const lng = pickCoord(fallbackLng);
+    if (lat == null || lng == null)
+        return null;
+    return {
+        place_id: placeId,
+        name: (_a = row === null || row === void 0 ? void 0 : row.name) !== null && _a !== void 0 ? _a : null,
+        address: (_b = row === null || row === void 0 ? void 0 : row.address) !== null && _b !== void 0 ? _b : null,
+        lat,
+        lng,
     };
 }
 const router = express_1.default.Router();
@@ -150,7 +213,7 @@ router.post('/recommend/commute', auth_1.authMiddleware, async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: 'Unauthorized: userId not found' });
         }
-        const { book_id, user_book_id, origin_place_id, destination_place_id, selected_route_id, } = req.body;
+        const { book_id, user_book_id, origin_place_id, destination_place_id, selected_route_id, originLat, originLng, destinationLat, destinationLng, origin_lat, origin_lng, destination_lat, destination_lng, } = req.body;
         // 1️⃣ 필수값 체크
         if (!book_id) {
             return res.status(400).json({ message: 'book_id is required' });
@@ -159,21 +222,31 @@ router.post('/recommend/commute', auth_1.authMiddleware, async (req, res) => {
             return res.status(400).json({ message: 'user_book_id is required' });
         }
         if (!origin_place_id || !destination_place_id || !selected_route_id) {
+            (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'validation_fail', {
+                reason: 'missing_place_or_route_ids',
+            });
             return res.status(400).json({
                 message: 'origin_place_id, destination_place_id, selected_route_id are required',
             });
         }
-        // 2️⃣ placeId → 좌표 조회
-        const origin = await (0, placesCacheRepository_1.getPlaceById)(String(origin_place_id));
-        const dest = await (0, placesCacheRepository_1.getPlaceById)(String(destination_place_id));
-        if (!origin ||
-            !dest ||
-            origin.lat == null ||
-            origin.lng == null ||
-            dest.lat == null ||
-            dest.lng == null) {
+        (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'start', {
+            userId,
+            book_id,
+            user_book_id,
+            origin_place_id,
+            destination_place_id,
+            selected_route_id,
+        });
+        // 2️⃣ placeId → 좌표 (places_cache + 본문 snake/camel 폴백)
+        const origin = await resolvePlaceForCommute(String(origin_place_id), pickCoord(origin_lat, originLat), pickCoord(origin_lng, originLng));
+        const dest = await resolvePlaceForCommute(String(destination_place_id), pickCoord(destination_lat, destinationLat), pickCoord(destination_lng, destinationLng));
+        if (!origin || !dest) {
+            (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'place_resolve_fail', {
+                origin_place_id,
+                destination_place_id,
+            });
             return res.status(400).json({
-                message: 'Invalid placeId. Please search places again.',
+                message: 'Invalid placeId or missing coordinates. Cache places or send origin_lat/originLat and destination_lat/destinationLat.',
             });
         }
         // 3️⃣ ODsay 호출 → 경로 생성
@@ -186,17 +259,27 @@ router.post('/recommend/commute', auth_1.authMiddleware, async (req, res) => {
         });
         const normalized = (0, odsayNormalize_1.normalizeOdsayRoutes)(raw);
         if (normalized === null || normalized === void 0 ? void 0 : normalized.odsayError) {
+            (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'odsay_error', {
+                detail: String(normalized.odsayError).slice(0, 200),
+            });
             return res.status(502).json({ message: normalized.odsayError });
         }
         const routes = (_b = normalized.routes) !== null && _b !== void 0 ? _b : [];
         const selected = routes.find((r) => String(r.id) === String(selected_route_id));
         if (!selected) {
+            (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'route_not_found', {
+                selected_route_id,
+                routeIds: routes.map((r) => r.id),
+            });
             return res.status(400).json({
                 message: `selected_route_id not found: ${selected_route_id}`,
             });
         }
         const availableMinutes = Number(selected.totalMinutes);
         if (!availableMinutes || availableMinutes <= 0) {
+            (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'invalid_commute_minutes', {
+                availableMinutes,
+            });
             return res.status(500).json({
                 message: 'Invalid commute time from selected route',
             });
@@ -207,15 +290,36 @@ router.post('/recommend/commute', auth_1.authMiddleware, async (req, res) => {
             bookId: book_id,
             availableMinutes,
         });
-        // 5️⃣ 응답
+        // 5️⃣ 응답 (camel + snake 병행 — 클라/문서 정합)
+        const olat = origin.lat != null ? Number(origin.lat) : null;
+        const olng = origin.lng != null ? Number(origin.lng) : null;
+        const dlat = dest.lat != null ? Number(dest.lat) : null;
+        const dlng = dest.lng != null ? Number(dest.lng) : null;
+        (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'ok', {
+            userId,
+            book_id,
+            availableMinutes,
+        });
         return res.json({
             ...recommendation,
             meta: {
                 userBookId: user_book_id,
+                user_book_id: user_book_id,
                 originPlaceId: origin_place_id,
+                origin_place_id: origin_place_id,
                 destinationPlaceId: destination_place_id,
+                destination_place_id: destination_place_id,
                 selectedRouteId: selected_route_id,
+                selected_route_id: selected_route_id,
                 availableMinutes,
+                originLat: olat,
+                originLng: olng,
+                destinationLat: dlat,
+                destinationLng: dlng,
+                origin_lat: olat,
+                origin_lng: olng,
+                destination_lat: dlat,
+                destination_lng: dlng,
                 selectedRouteSummary: {
                     tag: (_c = selected.tag) !== null && _c !== void 0 ? _c : null,
                     totalMinutes: (_d = selected.totalMinutes) !== null && _d !== void 0 ? _d : null,
@@ -228,6 +332,9 @@ router.post('/recommend/commute', auth_1.authMiddleware, async (req, res) => {
     }
     catch (err) {
         console.error('[POST /api/reading/recommend/commute] error', err);
+        (0, apiDebugLog_1.apiDebugLog)('reading:recommend:commute', 'exception', {
+            message: err === null || err === void 0 ? void 0 : err.message,
+        });
         return res.status(500).json({
             message: (_h = err === null || err === void 0 ? void 0 : err.message) !== null && _h !== void 0 ? _h : 'Internal server error',
         });
@@ -412,13 +519,19 @@ router.post('/recommend', auth_1.authMiddleware, async (req, res) => {
     }
 });
 router.post('/sessions', auth_1.authMiddleware, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
         if (!userId) {
             return res.status(401).json({ message: 'Unauthorized: userId not found' });
         }
-        const { user_book_id, book_id, start_page, end_page, planned_pages, session_type, origin_place_id, destination_place_id, selected_route_id, } = req.body;
+        (0, apiDebugLog_1.apiDebugLog)('reading:sessions', 'request', {
+            userId,
+            session_type: req.body.session_type,
+            book_id: req.body.book_id,
+            user_book_id: req.body.user_book_id,
+        });
+        const { user_book_id, book_id, start_page, end_page, planned_pages, session_type, origin_place_id, destination_place_id, selected_route_id, originLat, originLng, destinationLat, destinationLng, origin_lat, origin_lng, destination_lat, destination_lng, } = req.body;
         if (!user_book_id)
             return res.status(400).json({ message: 'user_book_id is required' });
         if (!book_id)
@@ -435,15 +548,22 @@ router.post('/sessions', auth_1.authMiddleware, async (req, res) => {
         // =========================
         if (effectiveType === 'commute') {
             if (!origin_place_id || !destination_place_id || !selected_route_id) {
+                (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'validation_fail', {
+                    reason: 'missing_place_or_route_ids',
+                });
                 return res.status(400).json({
                     message: 'origin_place_id, destination_place_id, selected_route_id are required',
                 });
             }
-            const origin = await (0, placesCacheRepository_1.getPlaceById)(String(origin_place_id));
-            const dest = await (0, placesCacheRepository_1.getPlaceById)(String(destination_place_id));
-            if (!origin || !dest || origin.lat == null || origin.lng == null || dest.lat == null || dest.lng == null) {
+            const origin = await resolvePlaceForCommute(String(origin_place_id), pickCoord(origin_lat, originLat), pickCoord(origin_lng, originLng));
+            const dest = await resolvePlaceForCommute(String(destination_place_id), pickCoord(destination_lat, destinationLat), pickCoord(destination_lng, destinationLng));
+            if (!origin || !dest) {
+                (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'place_resolve_fail', {
+                    origin_place_id,
+                    destination_place_id,
+                });
                 return res.status(400).json({
-                    message: 'placeId not found or missing lat/lng',
+                    message: 'placeId not found or missing lat/lng. Cache places or send origin_lat/originLat and destination_lat/destinationLat.',
                 });
             }
             // ✅ ODsay 호출
@@ -456,16 +576,50 @@ router.post('/sessions', auth_1.authMiddleware, async (req, res) => {
             });
             const normalized = (0, odsayNormalize_1.normalizeOdsayRoutes)(raw);
             if (normalized === null || normalized === void 0 ? void 0 : normalized.odsayError) {
+                (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'odsay_error', {
+                    detail: String(normalized.odsayError).slice(0, 200),
+                });
                 return res.status(502).json({ message: normalized.odsayError });
             }
             const routes = (_b = normalized.routes) !== null && _b !== void 0 ? _b : [];
             const selected = routes.find((r) => String(r.id) === String(selected_route_id));
             if (!selected) {
+                (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'route_not_found', {
+                    selected_route_id,
+                    routeIds: routes.map((r) => r.id),
+                });
                 return res.status(400).json({ message: `selected_route_id not found` });
             }
             // ⭐⭐⭐ 핵심 추가 부분 ⭐⭐⭐
             const enrichedRoute = enrichSegmentsWithStations(selected);
-            // ✅ 세션 저장
+            let insOLat = (_c = pickCoord(origin_lat, originLat)) !== null && _c !== void 0 ? _c : (origin.lat != null ? Number(origin.lat) : null);
+            let insOLng = (_d = pickCoord(origin_lng, originLng)) !== null && _d !== void 0 ? _d : (origin.lng != null ? Number(origin.lng) : null);
+            let insDLat = (_e = pickCoord(destination_lat, destinationLat)) !== null && _e !== void 0 ? _e : (dest.lat != null ? Number(dest.lat) : null);
+            let insDLng = (_f = pickCoord(destination_lng, destinationLng)) !== null && _f !== void 0 ? _f : (dest.lng != null ? Number(dest.lng) : null);
+            if (insOLat == null || insOLng == null || insDLat == null || insDLng == null) {
+                const fromRoute = coordsFromEnrichedRoute(enrichedRoute);
+                if (fromRoute) {
+                    if (insOLat == null)
+                        insOLat = fromRoute.originLat;
+                    if (insOLng == null)
+                        insOLng = fromRoute.originLng;
+                    if (insDLat == null)
+                        insDLat = fromRoute.destinationLat;
+                    if (insDLng == null)
+                        insDLng = fromRoute.destinationLng;
+                }
+            }
+            (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'insert', {
+                userId,
+                selected_route_id,
+                coords: {
+                    origin_lat: insOLat,
+                    origin_lng: insOLng,
+                    destination_lat: insDLat,
+                    destination_lng: insDLng,
+                },
+            });
+            // ✅ 세션 저장 (reading_sessions.origin_lat 등 ← 본문 우선, 해석 좌표, 경로 정류장 폴백)
             const session = await createReadingSession({
                 userId,
                 userBookId: user_book_id,
@@ -478,24 +632,26 @@ router.post('/sessions', auth_1.authMiddleware, async (req, res) => {
                 originPlaceId: String(origin_place_id),
                 destinationPlaceId: String(destination_place_id),
                 selectedRouteId: String(selected_route_id),
-                commuteTotalMinutes: (_c = enrichedRoute.totalMinutes) !== null && _c !== void 0 ? _c : null,
-                commuteWalkMinutes: (_d = enrichedRoute.walkMinutes) !== null && _d !== void 0 ? _d : null,
-                commuteTransfers: (_e = enrichedRoute.transfers) !== null && _e !== void 0 ? _e : null,
-                commuteFare: (_f = enrichedRoute.fare) !== null && _f !== void 0 ? _f : null,
-                // ⭐ 변경된 부분
+                commuteTotalMinutes: (_g = enrichedRoute.totalMinutes) !== null && _g !== void 0 ? _g : null,
+                commuteWalkMinutes: (_h = enrichedRoute.walkMinutes) !== null && _h !== void 0 ? _h : null,
+                commuteTransfers: (_j = enrichedRoute.transfers) !== null && _j !== void 0 ? _j : null,
+                commuteFare: (_k = enrichedRoute.fare) !== null && _k !== void 0 ? _k : null,
                 commuteRouteJson: enrichedRoute,
+                originLat: insOLat,
+                originLng: insOLng,
+                destinationLat: insDLat,
+                destinationLng: insDLng,
             });
-            return res.status(201).json({
-                ...session,
-                originLat: origin.lat,
-                originLng: origin.lng,
-                destinationLat: dest.lat,
-                destinationLng: dest.lng,
+            (0, apiDebugLog_1.apiDebugLog)('reading:sessions:commute', 'created', {
+                sessionId: session.id,
+                userId,
             });
+            return res.status(201).json(session);
         }
         // =========================
         // ⏱ TIMER 세션
         // =========================
+        (0, apiDebugLog_1.apiDebugLog)('reading:sessions:timer', 'insert', { userId, book_id, user_book_id });
         const session = await createReadingSession({
             userId,
             userBookId: user_book_id,
@@ -506,10 +662,14 @@ router.post('/sessions', auth_1.authMiddleware, async (req, res) => {
             sessionType: 'timer',
             commuteProfileId: null,
         });
+        (0, apiDebugLog_1.apiDebugLog)('reading:sessions:timer', 'created', { sessionId: session.id, userId });
         return res.status(201).json(session);
     }
     catch (err) {
         console.error('[POST /api/reading/sessions] error', err);
+        (0, apiDebugLog_1.apiDebugLog)('reading:sessions', 'exception', {
+            message: err instanceof Error ? err.message : String(err),
+        });
         return res.status(500).json({ message: 'Internal server error' });
     }
 });
