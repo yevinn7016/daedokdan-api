@@ -73,11 +73,12 @@ startPushScheduler();
 /* =========================
    Server Start
 ========================= */
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
-app.listen(PORT, () => {
-  console.log(`🚀 daedokdan-api running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 daedokdan-api running on port ${PORT}`);
   console.log('🔗 search routes mounted at /api/search');
   console.log('📖 reading routes mounted at /api/reading');
   console.log('🔔 push routes mounted at /api/push');
 });
+  
