@@ -1,9 +1,10 @@
 import { Response } from 'express';
 import { isUserAdultVerified } from '../clients/authClient';
+import { isAdultContentHidden } from '../utils/adultBookFilter';
 
 /**
  * 성인 도서 접근 시 인증 여부 확인.
- * 접근 불가 시 403 응답을 보내고 false 반환.
+ * HIDE_ADULT_BOOKS 모드(기본)면 404, 미인증이면 403.
  */
 export async function requireAdultVerified(
   res: Response,
@@ -12,6 +13,11 @@ export async function requireAdultVerified(
 ): Promise<boolean> {
   if (!isAdult) {
     return true;
+  }
+
+  if (isAdultContentHidden()) {
+    res.status(404).json({ message: 'Book not found' });
+    return false;
   }
 
   if (!userId) {
