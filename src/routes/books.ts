@@ -16,6 +16,9 @@ import { addRecentBook } from '../repositories/recentBooksRepository';
 
 // ✅ 토큰 기반 인증 미들웨어 (named import)
 import { authMiddleware } from '../middlewares/auth';
+import { optionalAuthMiddleware } from '../middlewares/optionalAuth';
+import { requireAdultVerified } from '../middlewares/requireAdultVerified';
+import { filterAdultBooks, resolveAdultVerified } from '../utils/adultBookFilter';
 
 const supabaseUrl = process.env.SUPABASE_URL ?? '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
@@ -60,6 +63,7 @@ router.get(
         description: it.description,
         link: it.link,
         isbn: it.isbn13 || it.isbn,
+        adult: Boolean(it.adult),
       }));
 
       const userId = req.user?.id;
@@ -67,13 +71,16 @@ router.get(
         return res.status(401).json({ message: 'Unauthorized: userId not found' });
       }
 
+      const adultVerified = await resolveAdultVerified(req);
+      const filteredItems = filterAdultBooks(mapped, adultVerified);
+
       saveRecentSearch(userId, q).catch((err) =>
         console.error('❌ failed to save recent search', err),
       );
 
       return res.json({
-        total: raw.totalResults,
-        items: mapped,
+        total: filteredItems.length,
+        items: filteredItems,
       });
     } catch (err) {
       console.error(err);
@@ -89,7 +96,7 @@ import { getBooksByPageRange } from "../services/recommendationService";
 
 
 // GET /api/books/by-pages?range=0-100
-router.get("/by-pages", async (req, res) => {
+router.get("/by-pages", optionalAuthMiddleware, async (req: AuthedRequest, res) => {
   try {
     const { range = "0-100", limit = "10" } = req.query;
 
@@ -98,9 +105,12 @@ router.get("/by-pages", async (req, res) => {
       Number(limit)
     );
 
+    const adultVerified = await resolveAdultVerified(req);
+    const filteredBooks = filterAdultBooks(books, adultVerified);
+
     res.json({
       success: true,
-      data: { books },
+      data: { books: filteredBooks },
       error: null,
     });
   } catch (error: any) {
@@ -209,6 +219,12 @@ router.get(
 
       if (!detailItem) {
         return res.status(404).json({ message: 'No detail info from Aladin' });
+      }
+
+      const resolvedAdult = Boolean(detailItem.adult ?? book?.adult);
+
+      if (!(await requireAdultVerified(res, userIdForRecent, resolvedAdult))) {
+        return;
       }
 
       // 페이지 수 / 서브 정보
@@ -320,6 +336,9 @@ router.get(
       if (!(book as any).google_books_id && googleBook?.google_id) {
         bookUpdate.google_books_id = googleBook.google_id;
       }
+      if (resolvedAdult !== Boolean((book as any).adult)) {
+        bookUpdate.adult = resolvedAdult;
+      }
 
       if (Object.keys(bookUpdate).length > 0) {
         const { error: bookUpdateErr } = await supabase
@@ -367,6 +386,7 @@ router.get(
 
       return res.json({
         ...book,
+        adult: resolvedAdult,
         aladin_link: detailItem.link ?? null,
         page_count: finalPageCount,
         categories: mergedCategories,
@@ -398,7 +418,7 @@ import { upsertBooks } from "../repositories/bookRepository";
  * 📚 카테고리별 책 조회 API
  * GET /api/books/category?categoryId=51391
  */
-router.get("/category", async (req, res) => {
+router.get("/category", optionalAuthMiddleware, async (req: AuthedRequest, res) => {
   try {
     const categoryId = Number(req.query.categoryId);
 
@@ -415,6 +435,8 @@ router.get("/category", async (req, res) => {
     // 2️⃣ DB 저장 (중복 방지)
     const savedBooks = await upsertBooks(booksFromAladin);
 
+    const adultVerified = await resolveAdultVerified(req);
+
     // 3️⃣ 응답 구조 맞추기
     const result = savedBooks.map((book: any) => ({
       id: book.id,
@@ -430,12 +452,13 @@ router.get("/category", async (req, res) => {
       google_books_id: book.google_books_id,
       created_at: book.created_at,
       aladin_item_id: book.aladin_item_id,
+      adult: Boolean(book.adult),
     }));
 
     res.json({
       success: true,
       data: {
-        books: result,
+        books: filterAdultBooks(result, adultVerified),
       },
       error: null,
     });
@@ -451,7 +474,7 @@ router.get("/category", async (req, res) => {
 import { CATEGORY_MAP } from "../config/categoryMap";
 
 
-router.get("/sections", async (req, res) => {
+router.get("/sections", optionalAuthMiddleware, async (req: AuthedRequest, res) => {
   try {
     const categoryKey = req.query.category as keyof typeof CATEGORY_MAP;
 
@@ -465,6 +488,7 @@ router.get("/sections", async (req, res) => {
     }
 
     const ids = category.ids;
+    const adultVerified = await resolveAdultVerified(req);
 
     // 🔥 병렬 호출
     const results = await Promise.all(
@@ -482,8 +506,14 @@ router.get("/sections", async (req, res) => {
     );
 
     // 🔥 합치기
-    const newBooks = results.flatMap((r) => r.newBooks).slice(0, 20);
-    const bestBooks = results.flatMap((r) => r.bestBooks).slice(0, 20);
+    const newBooks = filterAdultBooks(
+      results.flatMap((r) => r.newBooks).slice(0, 20),
+      adultVerified,
+    );
+    const bestBooks = filterAdultBooks(
+      results.flatMap((r) => r.bestBooks).slice(0, 20),
+      adultVerified,
+    );
 
     res.json({
       success: true,

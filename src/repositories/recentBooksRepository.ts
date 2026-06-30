@@ -51,7 +51,11 @@ export async function addRecentBook(userId: string, bookId: string) {
 /**
  * 최근 본 책 리스트 조회
  */
-export async function getRecentBooks(userId: string, limit = 10) {
+export async function getRecentBooks(
+  userId: string,
+  limit = 10,
+  adultVerified = false,
+) {
   const { data: recentRows, error: recentErr } = await supabase
     .from('user_recent_books')
     .select('book_id, created_at')
@@ -79,7 +83,8 @@ export async function getRecentBooks(userId: string, limit = 10) {
       book: bookMap.get(row.book_id),
       created_at: row.created_at,
     }))
-    .filter((item) => !!item.book);
+    .filter((item) => !!item.book)
+    .filter((item) => adultVerified || !item.book?.adult);
 }
 
 /**

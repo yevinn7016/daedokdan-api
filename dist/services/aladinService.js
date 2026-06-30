@@ -35,6 +35,7 @@ async function fetchBooks(categoryId, queryType = "Bestseller", maxResults = 10,
         categories: [item.categoryName],
         thumbnail_url: item.cover,
         google_books_id: null,
+        adult: Boolean(item.adult),
     }));
 }
 async function fetchBooksByCategory(categoryId) {

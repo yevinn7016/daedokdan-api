@@ -28,6 +28,7 @@ export async function upsertBooksFromAladinItems(items: any[]) {
       language: "ko",
       categories,
       thumbnail_url: it.cover ?? null,
+      adult: Boolean(it.adult),
     };
   });
 

@@ -51,7 +51,7 @@ async function addRecentBook(userId, bookId) {
 /**
  * 최근 본 책 리스트 조회
  */
-async function getRecentBooks(userId, limit = 10) {
+async function getRecentBooks(userId, limit = 10, adultVerified = false) {
     const { data: recentRows, error: recentErr } = await supabase
         .from('user_recent_books')
         .select('book_id, created_at')
@@ -76,7 +76,8 @@ async function getRecentBooks(userId, limit = 10) {
         book: bookMap.get(row.book_id),
         created_at: row.created_at,
     }))
-        .filter((item) => !!item.book);
+        .filter((item) => !!item.book)
+        .filter((item) => { var _a; return adultVerified || !((_a = item.book) === null || _a === void 0 ? void 0 : _a.adult); });
 }
 /**
  * 특정 책만 최근 목록에서 제거

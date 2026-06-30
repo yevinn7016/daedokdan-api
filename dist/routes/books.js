@@ -12,6 +12,9 @@ const searchRepository_1 = require("../repositories/searchRepository");
 const recentBooksRepository_1 = require("../repositories/recentBooksRepository");
 // ✅ 토큰 기반 인증 미들웨어 (named import)
 const auth_1 = require("../middlewares/auth");
+const optionalAuth_1 = require("../middlewares/optionalAuth");
+const requireAdultVerified_1 = require("../middlewares/requireAdultVerified");
+const adultBookFilter_1 = require("../utils/adultBookFilter");
 const supabaseUrl = (_a = process.env.SUPABASE_URL) !== null && _a !== void 0 ? _a : '';
 const supabaseServiceRoleKey = (_b = process.env.SUPABASE_SERVICE_ROLE_KEY) !== null && _b !== void 0 ? _b : '';
 const supabase = (0, supabase_js_1.createClient)(supabaseUrl, supabaseServiceRoleKey);
@@ -41,15 +44,18 @@ router.get('/search/books', auth_1.authMiddleware, async (req, res) => {
             description: it.description,
             link: it.link,
             isbn: it.isbn13 || it.isbn,
+            adult: Boolean(it.adult),
         }));
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
         if (!userId) {
             return res.status(401).json({ message: 'Unauthorized: userId not found' });
         }
+        const adultVerified = await (0, adultBookFilter_1.resolveAdultVerified)(req);
+        const filteredItems = (0, adultBookFilter_1.filterAdultBooks)(mapped, adultVerified);
         (0, searchRepository_1.saveRecentSearch)(userId, q).catch((err) => console.error('❌ failed to save recent search', err));
         return res.json({
-            total: raw.totalResults,
-            items: mapped,
+            total: filteredItems.length,
+            items: filteredItems,
         });
     }
     catch (err) {
@@ -59,13 +65,15 @@ router.get('/search/books', auth_1.authMiddleware, async (req, res) => {
 });
 const recommendationService_1 = require("../services/recommendationService");
 // GET /api/books/by-pages?range=0-100
-router.get("/by-pages", async (req, res) => {
+router.get("/by-pages", optionalAuth_1.optionalAuthMiddleware, async (req, res) => {
     try {
         const { range = "0-100", limit = "10" } = req.query;
         const books = await (0, recommendationService_1.getBooksByPageRange)(String(range), Number(limit));
+        const adultVerified = await (0, adultBookFilter_1.resolveAdultVerified)(req);
+        const filteredBooks = (0, adultBookFilter_1.filterAdultBooks)(books, adultVerified);
         res.json({
             success: true,
-            data: { books },
+            data: { books: filteredBooks },
             error: null,
         });
     }
@@ -83,7 +91,7 @@ router.get("/by-pages", async (req, res) => {
  * - book_details 저장 + books 업데이트 + 최근 본 책 기록 + 판매처 링크 포함
  */
 router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y;
     const { itemId } = req.params;
     if (!/^\d+$/.test(itemId)) {
         return next();
@@ -154,8 +162,12 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
         if (!detailItem) {
             return res.status(404).json({ message: 'No detail info from Aladin' });
         }
+        const resolvedAdult = Boolean((_c = detailItem.adult) !== null && _c !== void 0 ? _c : book === null || book === void 0 ? void 0 : book.adult);
+        if (!(await (0, requireAdultVerified_1.requireAdultVerified)(res, userIdForRecent, resolvedAdult))) {
+            return;
+        }
         // 페이지 수 / 서브 정보
-        const subInfo = (_c = detailItem.subInfo) !== null && _c !== void 0 ? _c : {};
+        const subInfo = (_d = detailItem.subInfo) !== null && _d !== void 0 ? _d : {};
         const authorsArr = Array.isArray(detailItem.authors)
             ? detailItem.authors
             : [];
@@ -178,12 +190,12 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
             }
         }
         // 책 소개
-        const rawFullDesc = (_f = (_e = (_d = subInfo.fullDescription) !== null && _d !== void 0 ? _d : detailItem.fullDescription) !== null && _e !== void 0 ? _e : detailItem.description) !== null && _f !== void 0 ? _f : null;
+        const rawFullDesc = (_g = (_f = (_e = subInfo.fullDescription) !== null && _e !== void 0 ? _e : detailItem.fullDescription) !== null && _f !== void 0 ? _f : detailItem.description) !== null && _g !== void 0 ? _g : null;
         const aladinDescription = typeof rawFullDesc === 'string' && rawFullDesc.trim()
             ? rawFullDesc
             : null;
         // 출판사 서평
-        const rawPublisherReview = (_j = (_h = (_g = subInfo.fullDescription2) !== null && _g !== void 0 ? _g : detailItem.fullDescription2) !== null && _h !== void 0 ? _h : detailItem.publisherReview) !== null && _j !== void 0 ? _j : null;
+        const rawPublisherReview = (_k = (_j = (_h = subInfo.fullDescription2) !== null && _h !== void 0 ? _h : detailItem.fullDescription2) !== null && _j !== void 0 ? _j : detailItem.publisherReview) !== null && _k !== void 0 ? _k : null;
         const aladinPublisherReview = typeof rawPublisherReview === 'string' && rawPublisherReview.trim()
             ? rawPublisherReview
             : null;
@@ -193,16 +205,16 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
             title,
             authors: authorsFromDb,
         });
-        const finalDescription = (_k = aladinDescription !== null && aladinDescription !== void 0 ? aladinDescription : ((googleBook === null || googleBook === void 0 ? void 0 : googleBook.description) && googleBook.description.trim()
+        const finalDescription = (_l = aladinDescription !== null && aladinDescription !== void 0 ? aladinDescription : ((googleBook === null || googleBook === void 0 ? void 0 : googleBook.description) && googleBook.description.trim()
             ? googleBook.description
-            : null)) !== null && _k !== void 0 ? _k : ((_l = detailRow === null || detailRow === void 0 ? void 0 : detailRow.description) !== null && _l !== void 0 ? _l : null);
+            : null)) !== null && _l !== void 0 ? _l : ((_m = detailRow === null || detailRow === void 0 ? void 0 : detailRow.description) !== null && _m !== void 0 ? _m : null);
         const finalAuthorIntro = (authorIntro === null || authorIntro === void 0 ? void 0 : authorIntro.trim()) ||
             (detailRow === null || detailRow === void 0 ? void 0 : detailRow.author_intro) ||
             null;
         const finalPublisherReview = aladinPublisherReview ||
             (detailRow === null || detailRow === void 0 ? void 0 : detailRow.publisher_review) ||
             null;
-        let finalPageCount = (_m = book.page_count) !== null && _m !== void 0 ? _m : null;
+        let finalPageCount = (_o = book.page_count) !== null && _o !== void 0 ? _o : null;
         if (!finalPageCount && aladinPageCount) {
             finalPageCount = aladinPageCount;
         }
@@ -211,8 +223,8 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
         }
         // 카테고리 merge
         const mergedCategories = Array.from(new Set([
-            ...((_o = book.categories) !== null && _o !== void 0 ? _o : []),
-            ...((_p = googleBook === null || googleBook === void 0 ? void 0 : googleBook.categories) !== null && _p !== void 0 ? _p : []),
+            ...((_p = book.categories) !== null && _p !== void 0 ? _p : []),
+            ...((_q = googleBook === null || googleBook === void 0 ? void 0 : googleBook.categories) !== null && _q !== void 0 ? _q : []),
         ]));
         // books 업데이트
         const bookUpdate = {};
@@ -230,6 +242,9 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
         }
         if (!book.google_books_id && (googleBook === null || googleBook === void 0 ? void 0 : googleBook.google_id)) {
             bookUpdate.google_books_id = googleBook.google_id;
+        }
+        if (resolvedAdult !== Boolean(book.adult)) {
+            bookUpdate.adult = resolvedAdult;
         }
         if (Object.keys(bookUpdate).length > 0) {
             const { error: bookUpdateErr } = await supabase
@@ -255,7 +270,7 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
         }
         // 판매처 링크
         const purchaseLinks = {
-            aladin: (_q = detailItem.link) !== null && _q !== void 0 ? _q : null,
+            aladin: (_r = detailItem.link) !== null && _r !== void 0 ? _r : null,
             yes24: isbn13 ? `https://www.yes24.com/search?query=${isbn13}` : null,
             kyobo: isbn13
                 ? `https://product.kyobobook.co.kr/search?keyword=${isbn13}`
@@ -269,12 +284,13 @@ router.get('/:itemId', auth_1.authMiddleware, async (req, res, next) => {
         };
         return res.json({
             ...book,
-            aladin_link: (_r = detailItem.link) !== null && _r !== void 0 ? _r : null,
+            adult: resolvedAdult,
+            aladin_link: (_s = detailItem.link) !== null && _s !== void 0 ? _s : null,
             page_count: finalPageCount,
             categories: mergedCategories,
-            thumbnail_url: (_t = (_s = book.thumbnail_url) !== null && _s !== void 0 ? _s : googleBook === null || googleBook === void 0 ? void 0 : googleBook.thumbnail_url) !== null && _t !== void 0 ? _t : null,
-            language: (_v = (_u = book.language) !== null && _u !== void 0 ? _u : googleBook === null || googleBook === void 0 ? void 0 : googleBook.language) !== null && _v !== void 0 ? _v : 'ko',
-            google_books_id: (_x = (_w = book.google_books_id) !== null && _w !== void 0 ? _w : googleBook === null || googleBook === void 0 ? void 0 : googleBook.google_id) !== null && _x !== void 0 ? _x : null,
+            thumbnail_url: (_u = (_t = book.thumbnail_url) !== null && _t !== void 0 ? _t : googleBook === null || googleBook === void 0 ? void 0 : googleBook.thumbnail_url) !== null && _u !== void 0 ? _u : null,
+            language: (_w = (_v = book.language) !== null && _v !== void 0 ? _v : googleBook === null || googleBook === void 0 ? void 0 : googleBook.language) !== null && _w !== void 0 ? _w : 'ko',
+            google_books_id: (_y = (_x = book.google_books_id) !== null && _x !== void 0 ? _x : googleBook === null || googleBook === void 0 ? void 0 : googleBook.google_id) !== null && _y !== void 0 ? _y : null,
             purchase_links: purchaseLinks,
             detail: {
                 description: finalDescription,
@@ -294,7 +310,7 @@ const bookRepository_2 = require("../repositories/bookRepository");
  * 📚 카테고리별 책 조회 API
  * GET /api/books/category?categoryId=51391
  */
-router.get("/category", async (req, res) => {
+router.get("/category", optionalAuth_1.optionalAuthMiddleware, async (req, res) => {
     try {
         const categoryId = Number(req.query.categoryId);
         if (!categoryId) {
@@ -307,6 +323,7 @@ router.get("/category", async (req, res) => {
         const booksFromAladin = await (0, aladinService_1.fetchBooksByCategory)(categoryId);
         // 2️⃣ DB 저장 (중복 방지)
         const savedBooks = await (0, bookRepository_2.upsertBooks)(booksFromAladin);
+        const adultVerified = await (0, adultBookFilter_1.resolveAdultVerified)(req);
         // 3️⃣ 응답 구조 맞추기
         const result = savedBooks.map((book) => ({
             id: book.id,
@@ -322,11 +339,12 @@ router.get("/category", async (req, res) => {
             google_books_id: book.google_books_id,
             created_at: book.created_at,
             aladin_item_id: book.aladin_item_id,
+            adult: Boolean(book.adult),
         }));
         res.json({
             success: true,
             data: {
-                books: result,
+                books: (0, adultBookFilter_1.filterAdultBooks)(result, adultVerified),
             },
             error: null,
         });
@@ -340,7 +358,7 @@ router.get("/category", async (req, res) => {
     }
 });
 const categoryMap_1 = require("../config/categoryMap");
-router.get("/sections", async (req, res) => {
+router.get("/sections", optionalAuth_1.optionalAuthMiddleware, async (req, res) => {
     try {
         const categoryKey = req.query.category;
         const category = categoryMap_1.CATEGORY_MAP[categoryKey];
@@ -351,6 +369,7 @@ router.get("/sections", async (req, res) => {
             });
         }
         const ids = category.ids;
+        const adultVerified = await (0, adultBookFilter_1.resolveAdultVerified)(req);
         // 🔥 병렬 호출
         const results = await Promise.all(ids.map(async (id) => {
             const [newBooks, bestBooks] = await Promise.all([
@@ -363,8 +382,8 @@ router.get("/sections", async (req, res) => {
             };
         }));
         // 🔥 합치기
-        const newBooks = results.flatMap((r) => r.newBooks).slice(0, 20);
-        const bestBooks = results.flatMap((r) => r.bestBooks).slice(0, 20);
+        const newBooks = (0, adultBookFilter_1.filterAdultBooks)(results.flatMap((r) => r.newBooks).slice(0, 20), adultVerified);
+        const bestBooks = (0, adultBookFilter_1.filterAdultBooks)(results.flatMap((r) => r.bestBooks).slice(0, 20), adultVerified);
         res.json({
             success: true,
             data: {

@@ -31,6 +31,7 @@ async function upsertBooksFromAladinItems(items) {
             language: "ko",
             categories,
             thumbnail_url: (_f = it.cover) !== null && _f !== void 0 ? _f : null,
+            adult: Boolean(it.adult),
         };
     });
     const { error } = await db_1.supabase

@@ -6,6 +6,7 @@ const searchRepository_1 = require("../repositories/searchRepository");
 const recentBooksRepository_1 = require("../repositories/recentBooksRepository");
 // ✅ 토큰 기반 인증 미들웨어
 const auth_1 = require("../middlewares/auth");
+const adultBookFilter_1 = require("../utils/adultBookFilter");
 const router = (0, express_1.Router)();
 /**
  * GET /api/search/recent
@@ -66,7 +67,8 @@ router.get('/recent-books', auth_1.authMiddleware, async (req, res) => {
     }
     const limit = Number((_b = req.query.limit) !== null && _b !== void 0 ? _b : 10);
     try {
-        const items = await (0, recentBooksRepository_1.getRecentBooks)(userId, limit);
+        const adultVerified = await (0, adultBookFilter_1.resolveAdultVerified)(req);
+        const items = await (0, recentBooksRepository_1.getRecentBooks)(userId, limit, adultVerified);
         return res.json({ items });
     }
     catch (err) {

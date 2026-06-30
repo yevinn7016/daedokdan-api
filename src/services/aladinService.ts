@@ -35,6 +35,7 @@ export async function fetchBooks(
     categories: [item.categoryName],
     thumbnail_url: item.cover,
     google_books_id: null,
+    adult: Boolean(item.adult),
   }));
 }
 

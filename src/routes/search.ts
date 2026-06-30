@@ -13,6 +13,7 @@ import {
 
 // ✅ 토큰 기반 인증 미들웨어
 import { authMiddleware } from '../middlewares/auth';
+import { resolveAdultVerified } from '../utils/adultBookFilter';
 
 const router = Router();
 
@@ -87,7 +88,8 @@ router.get(
     const limit = Number(req.query.limit ?? 10);
 
     try {
-      const items = await getRecentBooks(userId, limit);
+      const adultVerified = await resolveAdultVerified(req);
+      const items = await getRecentBooks(userId, limit, adultVerified);
       return res.json({ items });
     } catch (err) {
       console.error('❌ getRecentBooks error', err);

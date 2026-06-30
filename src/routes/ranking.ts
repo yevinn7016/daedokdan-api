@@ -2,17 +2,21 @@
 
 import { Router } from "express";
 import { getBookRanking } from "../services/rankingService";
+import { optionalAuthMiddleware } from "../middlewares/optionalAuth";
+import { AuthedRequest } from "../middlewares/auth";
+import { filterAdultBooks, resolveAdultVerified } from "../utils/adultBookFilter";
 
 const router = Router();
 
-router.get("/books", async (req, res) => {
+router.get("/books", optionalAuthMiddleware, async (req: AuthedRequest, res) => {
   try {
     const rankings = await getBookRanking();
+    const adultVerified = await resolveAdultVerified(req);
 
     res.json({
       success: true,
       data: {
-        rankings,
+        rankings: filterAdultBooks(rankings, adultVerified),
       },
       error: null,
     });
